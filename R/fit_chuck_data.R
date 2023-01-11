@@ -106,6 +106,7 @@ data <- list(
 n_property <- n_passes |> pull(property_idx) |> unique() |> length()
 n_timestep <- n_passes |> group_by(property_idx) |> tally() |> pull(n)
 n_methods <- max(methods, na.rm = TRUE)
+n_beta <- 6
 
 constants <- list(
   n_units = nrow(ymat),
@@ -113,6 +114,7 @@ constants <- list(
   n_property = n_property,
   n_timestep = n_timestep,
   n_methods = n_methods,
+  n_beta = n_beta,
   property = n_passes |> pull(property_idx) |> as.factor() |> as.numeric(),
   timestep = n_passes |> pull(timestep_idx),
   method = methods
@@ -136,10 +138,11 @@ inits <- function(){
   list(
     n = y_removed + 10,
     log_mu1 = log(rowSums(data$y_removed, na.rm = TRUE)),
-    # log_mu_proc = log(y_removed + 10),
+    log_mu_proc = log(y_removed + 10),
     log_lambda = log(matrix(runif(n_property * max(n_timestep), 0.01, 1), n_property, max(n_timestep))),
-    mu_p = runif(constants$n_methods, 1, 2)
-    # tau_p = runif(1, 0, 2)
+    mu_p = runif(n_methods, 1, 2),
+    tau_p = runif(1, 0, 2),
+    beta = matrix(rnorm(n_property * n_beta), n_property, n_beta)
   )
 }
 
@@ -220,9 +223,9 @@ subset_check_burnin <- function(node, plot = FALSE){
   return(burnin)
 }
 
-nodes1 <- c("mu_p", "log_mu1", "tau_p")
-nodes2 <- c(lambda_monitor, n_monitor)
-nodes_check <- c(nodes1, lambda_monitor)
+nodes1 <- c("mu_p", "log_mu1", "tau_p", "beta")
+nodes2 <- c(n_monitor)
+nodes_check <- c(nodes1)
 
 mcmc <- samples
 checks <- map_dfr(lapply(nodes_check, subset_check_mcmc), as.data.frame)
