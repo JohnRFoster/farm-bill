@@ -8,7 +8,7 @@ dir_data <- "data"
 take_csv <- "all_chuck_data.csv"
 
 dir_out <- "out"
-dir_model <- "basic"
+dir_model <- "basic_proc_x"
 
 chuck_data <- read_csv(file.path(dir_data, take_csv))
 take_df <- chuck_data |>
@@ -44,10 +44,6 @@ ymat <- data_ls$ymat       # take, each row is a spatio-temporal unit (property 
 Areaper <- data_ls$Areaper # area of impact
 Xd <- data_ls$Xd           # basis function coefficients
 gbe <- data_ls$gbe         # effort
-
-
-
-
 
 # the number of passes within each property x timestep
 n_passes <- passes |>
@@ -140,8 +136,7 @@ inits <- function(){
   list(
     n = y_removed + 10,
     log_mu1 = log(rowSums(data$y_removed, na.rm = TRUE)),
-    # z = z_init,
-    # mu_log = log(n_init + 1),
+    # log_mu_proc = log(y_removed + 10),
     log_lambda = log(matrix(runif(n_property * max(n_timestep), 0.01, 1), n_property, max(n_timestep))),
     mu_p = runif(constants$n_methods, 1, 2)
     # tau_p = runif(1, 0, 2)
@@ -190,29 +185,6 @@ samples <- runMCMC(
 )
 
 
-subset_out <- function(mcmc_out, state.col){
-
-  mat2mcmc_list <- function(w) {
-    temp <- list()
-    chain.col <- which(colnames(w) == "CHAIN")
-    for (i in unique(w[, "CHAIN"])) {
-      temp[[i]] <- coda:::as.mcmc(w[w[, "CHAIN"] == i, -chain.col])
-    }
-    return(as.mcmc.list(temp))
-  }
-
-  mfit <- as.matrix(mcmc_out, chains = TRUE)
-  pred.cols <- grep(state.col, colnames(mfit), fixed = TRUE)
-  chain.col <- which(colnames(mfit) == "CHAIN")
-  out <- mat2mcmc_list(mfit[, c(chain.col, pred.cols)])
-  return(out)
-}
-
-n <- subset_out(samples, "n")
-mu_p <- subset_out(samples, "mu_p")
-log_mu1 <- subset_out(samples, "log_mu1")
-log_lambda <- subset_out(samples, "log_lambda")
-
 # check convergence and effective sample size on specified node
 subset_check_mcmc <- function(node){
   s <- mcmc[,grep(node, colnames(mcmc[[1]]), value = TRUE, fixed = TRUE)]
@@ -236,15 +208,19 @@ subset_check_burnin <- function(node, plot = FALSE){
     unlink(ff)
   }
   shrink <- GBR$shrink[, , 2]
-  if(is.null(dim(s$chain1))){
-    burnin <- GBR$last.iter[tail(which(shrink > 1.1, 1), 1) + 1]
+  if(all(shrink < 1.1)){
+    burnin <- 1
   } else {
-    burnin <- GBR$last.iter[tail(which(apply(shrink > 1.1, 1, any)), 1) + 1]
+    if(is.null(dim(s$chain1))){
+      burnin <- GBR$last.iter[tail(which(shrink > 1.1), 1) + 1]
+    } else {
+      burnin <- GBR$last.iter[tail(which(apply(shrink > 1.1, 1, any)), 1) + 1]
+    }
   }
   return(burnin)
 }
 
-nodes1 <- c("mu_p", "log_mu1")
+nodes1 <- c("mu_p", "log_mu1", "tau_p")
 nodes2 <- c(lambda_monitor, n_monitor)
 nodes_check <- c(nodes1, lambda_monitor)
 
@@ -255,6 +231,7 @@ checks
 burnin <- map_dbl(lapply(nodes_check, subset_check_burnin), as.vector)
 burnin
 max(burnin)
+
 samples_burn <- window(samples, start = max(burnin))
 
 method_lookup <- passes |>
@@ -277,6 +254,7 @@ property_lookup <- passes |>
 
 
 path <- file.path(dir_out, dir_model)
+print(path)
 if(!dir.exists(path)) dir.create(path, recursive = TRUE, showWarnings = FALSE)
 
 write_rds(

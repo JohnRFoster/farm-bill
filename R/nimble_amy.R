@@ -1,10 +1,5 @@
 modelCode <- nimbleCode({
 
-  # multinomial likelihood
-  # for(i in 1:n_units){
-  #   y[i, 1:n_passes[i]] ~ dmulti(pi[i, 1:n_passes[i]], n[property[i], timestep[i]])
-  # }
-
   for(i in 1:n_property){
 
     n[i, 1] ~ dpois(mu1[i])
@@ -19,15 +14,14 @@ modelCode <- nimbleCode({
       log_lambda[i, t-1] ~ dnorm(0, tau = 0.1)
 
       n[i, t] ~ dpois(mu[i, t])
-      # log(mu[i, t]) <- mu_log[i, t]
-      # mu[i, t] <- mu_log[i, t]
-      # mu_log[i, t] ~ T(dnorm(mu_phi[i, t], tau = tau_p), 0, Inf)
-      log(mu[i, t]) <- log_lambda[i, t-1] + log(z[i, t-1])
+      log(mu[i, t]) <- log_mu_proc[i, t]
+      log_mu_proc[i, t] ~ dnorm(log_mu[i, t], tau = tau_p)
+      log_mu[i, t] <- log_lambda[i, t-1] + log(z[i, t-1])
       z[i, t-1] <- n[i, t-1] - y_removed[i, t-1]
     }
   }
 
-  # tau_p ~ dexp(1)
+  tau_p ~ dexp(1)
 
   for(i in 1:n_units){
 
