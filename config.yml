@@ -1,0 +1,15 @@
+default:
+  dir_out: "out"
+  dir_model: "basic"
+  include_proc: FALSE
+  include_beta: FALSE
+
+basic_process:
+  dir_model: "basic_proc"
+  include_proc: TRUE
+
+basic_process_beta:
+  dir_model: "basic_proc"
+  include_proc: TRUE
+  include_beta: TRUE
+  nodes: !expr c("beta")
