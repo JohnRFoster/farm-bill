@@ -1,15 +1,21 @@
+library(config)
 library(tidyverse)
 library(nimble)
 library(lubridate)
 library(targets)
 library(coda)
 
+
+Sys.setenv(R_CONFIG_ACTIVE = "basic_process_beta")
+config <- config::get()
+dir_out <- config$dir_out
+dir_model <- config$dir_model
+include_beta <- config$include_beta
+include_proc <- config$include_proc
+
 dir_data <- "data"
+
 take_csv <- "all_chuck_data.csv"
-
-dir_out <- "out"
-dir_model <- "basic_proc_x"
-
 chuck_data <- read_csv(file.path(dir_data, take_csv))
 take_df <- chuck_data |>
   arrange(Property, timestep) |>
