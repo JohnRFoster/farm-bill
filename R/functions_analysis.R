@@ -19,7 +19,9 @@ read_output <- function(filedest) {
 }
 
 
-
+############
+# modify output with correct names, time steps, and properties
+############
 name_nodes <- function(mcmc_samples, model_name, n_mcmc = 5000){
 
   samples_mat <- as.matrix(mcmc_samples)
@@ -39,6 +41,7 @@ name_nodes <- function(mcmc_samples, model_name, n_mcmc = 5000){
       name = if_else(grepl("lambda", node), "Growth Rate", name),
       name = if_else(grepl("n", node), "Abundance", name),
       name = if_else(grepl("tau", node), "Process Error", name),
+      name = if_else(grepl("beta", node), "Basis Function Coefficients", name),
       value = if_else(grepl("mu_p", node), boot::inv.logit(value), value),
       value = if_else(grepl("log_mu1", node), exp(value), value),
       value = if_else(grepl("lambda", node), exp(value), value),
@@ -56,7 +59,9 @@ name_nodes <- function(mcmc_samples, model_name, n_mcmc = 5000){
 }
 
 
-
+############
+# create quantiles
+############
 get_quantiles <- function(mcmc_names){
   mcmc_names |>
     group_by(node, name, property_idx, timestep, method, Property, model) |>
@@ -68,7 +73,9 @@ get_quantiles <- function(mcmc_names){
 }
 
 
-
+############
+# plot capture rate
+############
 gg_capture_prob_pointrange <- function(mcmc_quants) {
   mcmc_quants |>
     filter(name == "Capture Prob") |>
@@ -81,22 +88,28 @@ gg_capture_prob_pointrange <- function(mcmc_quants) {
     theme_bw()
 }
 
-
+############
+# plot growth rate
+############
 gg_lambda_pointrange <- function(mcmc_quants){
   mcmc_quants |>
     filter(name == "Growth Rate") |>
     ggplot() +
-    aes(x = PPNum, ymin = lower, ymax = upper, y = median) +
+    aes(x = pp_end_date, ymin = lower, ymax = upper, y = median) +
     geom_pointrange() +
     geom_hline(yintercept = 1, linetype = "dashed") +
     facet_wrap(~ Property) +
     coord_cartesian(ylim = c(0, 15)) +
     labs(title = "Population growth rate",
-         x = "Primary period index",
+         x = "PP end date",
          y = "Growth rate") +
-    theme_bw()
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
 }
 
+############
+# plot abundance
+############
 gg_abundance_pointrange <- function(mcmc_quants, removed){
   obs <- removed |>
     as_tibble() |>
@@ -117,9 +130,10 @@ gg_abundance_pointrange <- function(mcmc_quants, removed){
     facet_wrap(~ Property) +
     # scale_y_log10() +
     labs(title = "Abundnace",
-         x = "Timestep",
+         x = "PP end date",
          y = "Number of pigs") +
-    theme_bw()
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
 }
 
 
