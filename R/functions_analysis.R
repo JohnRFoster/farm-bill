@@ -30,7 +30,7 @@ name_nodes <- function(mcmc_samples, model_name, n_mcmc = 5000){
   mcmc <- samples_mat |>
     as_tibble() |>
     slice(draws) |>
-    select(contains("mu_p"), contains("log_mu1"), all_of(nodes2)) |>
+    # select(contains("mu_p"), contains("log_mu1"), all_of(nodes2)) |>
     mutate(iter = 1:n()) |>
     pivot_longer(cols = -iter,
                  names_to = "node") |>
@@ -45,6 +45,7 @@ name_nodes <- function(mcmc_samples, model_name, n_mcmc = 5000){
       value = if_else(grepl("mu_p", node), boot::inv.logit(value), value),
       value = if_else(grepl("log_mu1", node), exp(value), value),
       value = if_else(grepl("lambda", node), exp(value), value),
+      value = if_else(grepl("tau", node), 1/sqrt(value), value),
       property_idx = str_extract(node, "(?<=\\[)\\d"),
       property_idx = as.numeric(property_idx),
       property_idx = if_else(grepl("mu_p", node), -1, property_idx),
@@ -80,8 +81,8 @@ gg_capture_prob_pointrange <- function(mcmc_quants) {
   mcmc_quants |>
     filter(name == "Capture Prob") |>
     ggplot() +
-    aes(x = method, ymin = lower, ymax = upper, y = median) +
-    geom_pointrange(size = 1.2, linewidth = 1.2) +
+    aes(x = method, ymin = lower, ymax = upper, y = median, color = model) +
+    geom_pointrange(size = 1.2, linewidth = 1.2, position = position_dodge(width=0.5)) +
     labs(title = "Capture Prob by method",
          x = "Method",
          y = "Probability") +
@@ -95,11 +96,11 @@ gg_lambda_pointrange <- function(mcmc_quants){
   mcmc_quants |>
     filter(name == "Growth Rate") |>
     ggplot() +
-    aes(x = pp_end_date, ymin = lower, ymax = upper, y = median) +
-    geom_pointrange() +
+    aes(x = pp_end_date, ymin = lower, ymax = upper, y = median, color = model) +
+    geom_pointrange(position = position_dodge(width=45)) +
     geom_hline(yintercept = 1, linetype = "dashed") +
     facet_wrap(~ Property) +
-    coord_cartesian(ylim = c(0, 15)) +
+    # coord_cartesian(ylim = c(0, 15)) +
     labs(title = "Population growth rate",
          x = "PP end date",
          y = "Growth rate") +
@@ -124,9 +125,9 @@ gg_abundance_pointrange <- function(mcmc_quants, removed){
     filter(name == "Abundance") |>
     left_join(obs) |>
     ggplot() +
-    aes(x = pp_end_date, ymin = lower, ymax = upper, y = median) +
-    geom_pointrange() +
-    geom_point(aes(y = Observed), color = "purple") +
+    aes(x = pp_end_date, ymin = lower, ymax = upper, y = median, color = model) +
+    geom_pointrange(position = position_dodge(width=45)) +
+    geom_point(aes(y = Observed), color = "black") +
     facet_wrap(~ Property) +
     # scale_y_log10() +
     labs(title = "Abundnace",
@@ -137,6 +138,41 @@ gg_abundance_pointrange <- function(mcmc_quants, removed){
 }
 
 
+############
+# calculate growth rate
+############
 
+calc_lambda <- function(beta_mcmc, X){
 
+  l <- with(nimble_constants, {
+    lambda_all <- tibble()
+    for(i in 1:n_units){
 
+      beta_node <- paste0("beta[", property[i])
+
+      beta <- beta_mcmc |>
+        filter(grepl(beta_node, node, fixed = TRUE)) |>
+        select(iter, value, timestep) |>
+        pivot_wider(names_from = timestep,
+                    values_from = value) |>
+        select(-iter) |>
+        as.matrix()
+
+      lambda <- vector()
+      for(m in seq_len(nrow(beta))){
+        lambda[m] <- exp(X[i,] %*% beta[m,])
+      }
+
+      lambda_tb <- tibble(
+        property_idx = property[i],
+        timestep = timestep[i],
+        lower = quantile(lambda, 0.025),
+        median = quantile(lambda, 0.5),
+        upper = quantile(lambda, 0.975),
+      )
+    lambda_all <- bind_rows(lambda_all, lambda_tb)
+    }
+    lambda_all
+  })
+  left_join(l, property_lookup)
+}
