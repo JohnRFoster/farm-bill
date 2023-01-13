@@ -3,13 +3,15 @@ default:
   dir_model: "basic"
   include_proc: FALSE
   include_beta: FALSE
+  nodes1: !expr c("mu_p", "log_mu1")
 
 basic_process:
   dir_model: "basic_proc"
   include_proc: TRUE
+  nodes1: !expr c("mu_p", "log_mu1", "tau_p")
 
 basic_process_beta:
-  dir_model: "basic_proc"
+  dir_model: "basic_proc_x"
   include_proc: TRUE
   include_beta: TRUE
-  nodes: !expr c("beta")
+  nodes1: !expr c("mu_p", "log_mu1", "tau_p", "beta")

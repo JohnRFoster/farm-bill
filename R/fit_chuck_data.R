@@ -5,8 +5,10 @@ library(lubridate)
 library(targets)
 library(coda)
 
+config_name <- "basic_process_beta"
 
-Sys.setenv(R_CONFIG_ACTIVE = "basic_process_beta")
+
+Sys.setenv(R_CONFIG_ACTIVE = config_name)
 config <- config::get()
 dir_out <- config$dir_out
 dir_model <- config$dir_model
@@ -140,15 +142,14 @@ for(i in 1:n_property){
 
 
 inits <- function(){
-  # z_init <- matrix(rpois(n_property * max(n_timestep), 50), n_property, max(n_timestep))
   list(
     n = y_removed + 10,
     log_mu1 = log(rowSums(data$y_removed, na.rm = TRUE)),
     log_mu_proc = log(y_removed + 10),
     log_lambda = log(matrix(runif(n_property * max(n_timestep), 0.01, 1), n_property, max(n_timestep))),
-    mu_p = runif(n_methods, 1, 2),
     tau_p = runif(1, 0, 2),
-    beta = matrix(rnorm(n_property * n_beta), n_property, n_beta)
+    beta = matrix(rnorm(n_property * n_beta), n_property, n_beta),
+    mu_p = runif(n_methods, 1, 2)
   )
 }
 
@@ -165,6 +166,7 @@ Rmodel <- nimbleModel(
   inits = inits_test,
   data = data
 )
+
 # warnings()
 # check initialization
 Rmodel$initializeInfo()
@@ -229,9 +231,13 @@ subset_check_burnin <- function(node, plot = FALSE){
   return(burnin)
 }
 
-nodes1 <- c("mu_p", "log_mu1", "tau_p", "beta")
-nodes2 <- c(n_monitor)
-nodes_check <- c(nodes1)
+nodes1 <- config$nodes1
+nodes2 <- n_monitor
+if(config_name %in% c("default", "basic_process")){
+  nodes2 <- c(nodes2, lambda_monitor)
+}
+
+nodes_check <- c(nodes1, nodes2)
 
 mcmc <- samples
 checks <- map_dfr(lapply(nodes_check, subset_check_mcmc), as.data.frame)
