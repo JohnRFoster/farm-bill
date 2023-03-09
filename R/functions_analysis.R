@@ -8,7 +8,8 @@ library(stringr)
 ############
 read_output <- function(filedest) {
   out <- read_rds(filedest)
-  list2env(out, envir = .GlobalEnv)
+  list2env(out, envir = globalenv()) |>
+    invisible()
   # out$samples            # mcmc samples
   # out$nimble_data        # data fed to nimble
   # out$nimble_constants   # constants fed to nimble
@@ -24,37 +25,41 @@ read_output <- function(filedest) {
 ############
 name_nodes <- function(mcmc_samples, model_name, n_mcmc = 5000){
 
+  method_lookup <- method_lookup |>
+    rename(method = Methods)
+
   samples_mat <- as.matrix(mcmc_samples)
   draws <- sample.int(nrow(samples_mat), n_mcmc, replace = TRUE)
 
   mcmc <- samples_mat |>
     as_tibble() |>
     slice(draws) |>
-    # select(contains("mu_p"), contains("log_mu1"), all_of(nodes2)) |>
+    select(contains(nodes1), all_of(nodes2)) |>
     mutate(iter = 1:n()) |>
     pivot_longer(cols = -iter,
-                 names_to = "node") |>
+                 names_to = "node") |> #filter(grepl("tau_p", node))
     mutate(
       model = model_name,
       name = if_else(grepl("mu_p", node), "Capture Prob", "x"),
       name = if_else(grepl("log_mu1", node), "Initial Condition", name),
       name = if_else(grepl("lambda", node), "Growth Rate", name),
       name = if_else(grepl("n", node), "Abundance", name),
+      name = if_else(grepl("M", node), "County Abundance", name),
+      name = if_else(grepl("N_disp", node), "Property Abundance with dispersion", name),
       name = if_else(grepl("tau", node), "Process Error", name),
       name = if_else(grepl("beta", node), "Basis Function Coefficients", name),
       value = if_else(grepl("mu_p", node), boot::inv.logit(value), value),
       value = if_else(grepl("log_mu1", node), exp(value), value),
       value = if_else(grepl("lambda", node), exp(value), value),
-      value = if_else(grepl("tau", node), 1/sqrt(value), value),
-      property_idx = str_extract(node, "(?<=\\[)\\d"),
+      # value = if_else(name == "Process Error", 1/sqrt(value), value),
+      property_idx = as.numeric(str_extract(node, "(?<=\\[)\\d")),
       property_idx = as.numeric(property_idx),
       property_idx = if_else(grepl("mu_p", node), -1, property_idx),
-      timestep = str_extract(node, "\\d*(?=\\])"),
+      timestep = as.numeric(str_extract(node, "\\d*(?=\\])")),
       timestep = as.numeric(timestep),
-      method = if_else("mu_p[1]" == node, "Aerial", "x"),
-      method = if_else("mu_p[2]" == node, "Shooting", method),
-      method = if_else("mu_p[3]" == node, "Trap", method)
+      method_idx = as.numeric(str_extract(node, "(?<=mu_p\\[)\\d")),
       ) |>
+    left_join(method_lookup) |>
     left_join(property_lookup)
   return(mcmc)
 }
@@ -121,7 +126,7 @@ gg_abundance_pointrange <- function(mcmc_quants, removed){
     mutate(timestep = as.numeric(timestep)) |>
     left_join(property_lookup)
 
-  param_stats |>
+  mcmc_quants |>
     filter(name == "Abundance") |>
     left_join(obs) |>
     ggplot() +
@@ -176,3 +181,52 @@ calc_lambda <- function(beta_mcmc, X){
   })
   left_join(l, property_lookup)
 }
+
+############
+# plot process error
+############
+gg_process_error_pointrange <- function(mcmc_quants) {
+  mcmc_quants |>
+    filter(name == "Process Error") |>
+    ggplot() +
+    aes(x = model, ymin = lower, ymax = upper, y = median, color = model) +
+    geom_pointrange(size = 1.2, linewidth = 1.2, position = position_dodge(width=0.5)) +
+    labs(title = "Model structural error",
+         x = "Model",
+         y = "Standard deviation (swine/PP/property)") +
+    theme_bw()
+}
+
+############
+# plot betas - basis function coefficients
+############
+gg_beta_basis_pointrange <- function(mcmc_quants) {
+  prop <- property_lookup |>
+    select(Property, property_idx)
+  mcmc_quants |>
+    filter(name == "Basis Function Coefficients") |>
+    rename(beta_n = timestep) |>
+    select(-Property, -method, -PPNum, -pp_start_date, -pp_end_date) |>
+    left_join(prop) |>
+    ggplot() +
+    aes(x = beta_n, ymin = lower, ymax = upper, y = median, color = model) +
+    geom_pointrange(size = 1.2, linewidth = 1.2, position = position_dodge(width=0.5)) +
+    geom_hline(yintercept = 0, linetype = "dashed") +
+    facet_wrap(~ Property) +
+    labs(title = "Basis Function Coefficients",
+         x = "Beta number (1 = intercept, 2:5 = basis functions)",
+         y = "Effect") +
+    theme_bw()
+}
+
+# Rcpp::cppFunction(
+#   'int fibonacci(const int x) {
+#               if (x == 0) return(0);
+#               if (x == 1) return(1);
+#               return (fibonacci(x - 1)) + fibonacci(x - 2);
+#           }')
+#
+# fibonacci(7)
+
+
+

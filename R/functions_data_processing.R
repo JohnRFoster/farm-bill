@@ -198,7 +198,7 @@ primaryperiodsequence<-function(PPmonths=1,rdate=rdata$Date){
 ### Creating a flexible secondary period sequence based on a set number of days, default is 1 day
 ###
 ###################
-secondaryperiod<-function(SPdays=1,rdate=rdata$Date){
+secondaryperiod<-function(SPdays=1,rdate, rdata){
 
   ad1=tapply(rdate,rdata$PPNum,function(x)ceiling(as.numeric(format(x,'%j'))/SPdays))
   ad2=lapply(ad1,function(x)as.numeric(factor(x,ordered=TRUE,levels=unique(x))))
@@ -216,9 +216,9 @@ get_site_data <- function(data){
   require(reshape2)
   require(splines)
 
-  Areaper_r <- Xd_r <- ymat_r <- gbe_r <- tibble()
-
+  Areaper_r <- Xd_r <- Xd_r_all <- ymat_r <- gbe_r <- method_r <-  tibble()
   properties <- unique(data$Property)
+  n_pp_all <- numeric(length(properties))
 
   for(i in seq_along(properties)){
 
@@ -237,11 +237,11 @@ get_site_data <- function(data){
     rdata=rdata[order(rdata$Site,rdata$Date,rdata$Methods),]
 
     ### Set the secondary period (SPdays = number of days for secondary period)
-    # rdata$SPNum=secondaryperiod(SPdays=0.1,rdate=rdata$Date)
-    rdata <- rdata |>
-      group_by(PPNum) |>
-      mutate(SPNum = 1:n()) |>
-      ungroup()
+    rdata$SPNum=secondaryperiod(SPdays = 1, rdate=rdata$Date, rdata = rdata)
+    # rdata <- rdata |>
+    #   group_by(PPNum) |>
+    #   mutate(SPNum = 1:n()) |>
+    #   ungroup()
 
     ### Upload or create an area data frame giving the area for each site in km2, allow for a buffer if removal efforts on the edge of the study area
     property_area <- rdata$area_km2[1]
@@ -286,6 +286,11 @@ get_site_data <- function(data){
     Xdat=cbind(1,(ymat$PPNum)/max(ymat$PPNum))
     Xd=cbind(1,bs(Xdat[,2],5))
 
+    Xdat_all=cbind(1, (min(ymat$PPNum):max(ymat$PPNum))/max(ymat$PPNum))
+    Xd_all=cbind(1,bs(Xdat_all[,2],5))
+
+    n_pp_all[i] <- nrow(Xd_all)
+
     prop_name <- rdata$Property[1]
 
     make_long <- function(df){
@@ -302,11 +307,17 @@ get_site_data <- function(data){
     Xd_long <- make_long(Xd)
     Xd_r <- bind_rows(Xd_r, Xd_long)
 
+    Xd_all_long <- make_long(Xd_all)
+    Xd_r_all <- bind_rows(Xd_r_all, Xd_all_long)
+
     ymat_long <- make_long(ymat)
     ymat_r <- bind_rows(ymat_r, ymat_long)
 
     gbe_long <- make_long(gbe)
     gbe_r <- bind_rows(gbe_r, gbe_long)
+
+    method_long <- make_long(gtypes)
+    method_r <- bind_rows(method_r, method_long)
 
   }
 
@@ -320,7 +331,10 @@ get_site_data <- function(data){
   return(list(
     Areaper = make_wide(Areaper_r),
     Xd = make_wide(Xd_r),
+    Xd_all = make_wide(Xd_r_all),
+    n_pp_all = n_pp_all,
     ymat = make_wide(ymat_r),
-    gbe = make_wide(gbe_r)
+    gbe = make_wide(gbe_r),
+    method = make_wide(method_r)
   ))
 }
