@@ -3,6 +3,9 @@ default:
   dir_model: "basic"
   include_proc: FALSE
   include_beta: FALSE
+  include_all_pp: FALSE
+  intercept_only: FALSE
+  include_county: FALSE
   nodes1: !expr c("mu_p", "log_mu1")
 
 basic_process:
@@ -15,3 +18,32 @@ basic_process_beta:
   include_proc: TRUE
   include_beta: TRUE
   nodes1: !expr c("mu_p", "log_mu1", "tau_p", "beta")
+
+basic_all_pp:
+  dir_model: "basic_all_pp"
+  include_proc: TRUE
+  include_beta: TRUE
+  include_all_pp: TRUE
+  nodes1: !expr c("mu_p", "log_mu1", "tau_p", "beta")
+
+basic_all_pp_intercept_only:
+  inherits: basic_all_pp
+  dir_model: "basic_all_pp_intercept_only"
+  intercept_only: TRUE
+
+basic_all_pp_intercept_only_pkt:
+  inherits: basic_all_pp
+  dir_model: "basic_all_pp_intercept_only_pkt"
+  intercept_only: TRUE
+
+basic_secondary_all_pp_pkt:
+  inherits: basic_all_pp
+  dir_out: "out/secondary_1"
+  dir_model: "basic"
+
+county_secondary_all_pp_pkt:
+  inherits: basic_all_pp
+  dir_out: "out/secondary_1"
+  dir_model: "county"
+  include_county: TRUE
+  nodes1: !expr c("mu_p", "tau_p", "beta", "k")
