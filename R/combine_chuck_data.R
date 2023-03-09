@@ -4,22 +4,25 @@ library(tidyverse)
 dir_data <- "data"
 dir_read <- "properties"
 
-all_chuck <- bind_rows(
-  lapply(
-    list.files(
-      file.path(dir_data, dir_read),
-      pattern = ".csv",
-      full.names = TRUE
-    ),
-    read_csv
-  )
-) |>
-  suppressMessages()
+# all_chuck <- bind_rows(
+#   lapply(
+#     list.files(
+#       file.path(dir_data, dir_read),
+#       pattern = ".csv",
+#       full.names = TRUE
+#     ),
+#     read_csv
+#   )
+# ) |>
+#   suppressMessages()
+
+all_chuck <- read_csv(file.path(dir_data, "Data_for_John.csv"))
 
 chuck_data <- all_chuck |>
-  mutate(Date = format(mdy_hm(Date), "%Y-%m-%d"),
+  mutate(Date = parse_date_time(Date, c("mdy", 'mdyHM')),
          Month = month(Date),
-         year = year(Date))
+         year = year(Date)) |>
+  select(-pp_end_date, -pp_start_date)
 
 min_date <- ymd(min(chuck_data$Date))
 max_date <- ymd(max(chuck_data$Date))
