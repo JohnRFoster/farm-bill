@@ -259,8 +259,8 @@ inits <- function(){
     tau_p = runif(1, 0, 2),
     beta = matrix(rnorm(n_property * n_beta), n_property, n_beta),
     mu_p = matrix(runif(n_methods*max(n_timestep), 0, 1), n_methods, max(n_timestep)),
-    # size = runif(3, 0.01, 2),
-    beta_k = rnorm(4)
+    size = runif(3, 0.01, 5)
+    # beta_k = rnorm(4)
   )
 }
 
@@ -271,7 +271,7 @@ str(inits_test)
 
 # options(error = recover)
 source("R/nimble_amy.R")
-source("R/function_nimble.R")
+source("R/functions_nimble.R")
 Rmodel <- nimbleModel(
   code = modelCode,
   constants = constants,
@@ -288,7 +288,7 @@ Rmodel$initializeInfo()
 mcmcConf_conj <- configureMCMC(Rmodel, useConjugacy = TRUE)
 # mcmcConf_no_conj <- configureMCMC(Rmodel, useConjugacy = FALSE)
 mcmcConf <- mcmcConf_conj
-mcmcConf$addMonitors(c("n", "M", "size", "N_disp", "size"))
+mcmcConf$addMonitors(c("n", "M", "size"))
 # these print statements will not display when running in parallel
 # mcmcConf$printMonitors()
 # mcmcConf$printSamplers(byType = TRUE)
@@ -297,7 +297,7 @@ Rmcmc <- buildMCMC(mcmcConf)
 Cmodel <- compileNimble(Rmodel)
 Cmcmc <- compileNimble(Rmcmc)
 
-n_iter <- 1e5
+n_iter <- 5e5
 n_chains <- 3
 
 samples <- runMCMC(
@@ -353,7 +353,7 @@ subset_check_burnin <- function(node, plot = FALSE){
   return(burnin)
 }
 
-nodes1 <- config$nodes1
+nodes1 <- c(config$nodes1, "size")
 nodes2 <- n_monitor
 if(config_name %in% c("default", "basic_process")){
   nodes2 <- c(nodes2, lambda_monitor)
@@ -367,9 +367,9 @@ checks
 
 burnin <- map_dbl(lapply(nodes_check, subset_check_burnin), as.vector)
 burnin
-max(burnin)
+max(burnin, na.rm = TRUE)
 
-samples_burn <- window(samples, start = max(burnin))
+samples_burn <- window(samples, start = max(burnin, na.rm = TRUE))
 
 method_lookup <- passes |>
   select(Methods, method_idx) |>
