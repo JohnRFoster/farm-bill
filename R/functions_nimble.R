@@ -2,8 +2,7 @@ sum_properties <- nimbleFunction(
 
   run = function(
     property = double(1),  # property vector index
-    # p = double(0),         # primary period number
-    z = double(1)           # latent abundance matrix
+    z = double(1)          # latent abundance vector
   ){
     N <- sum(z[property])
     return(N)
