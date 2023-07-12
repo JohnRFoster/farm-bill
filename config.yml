@@ -1,49 +1,78 @@
 default:
-  dir_out: "out"
-  dir_model: "basic"
-  include_proc: FALSE
-  include_beta: FALSE
-  include_all_pp: FALSE
-  intercept_only: FALSE
-  include_county: FALSE
-  nodes1: !expr c("mu_p", "log_mu1")
+  phi_static: TRUE
+  rho_static: TRUE
+  lambda_static: NULL
+  nb_likelihood: TRUE
+  phi_config: "static"
+  rho_config: "static"
+  dir_out: "out/dm"
+  nodes1: !expr c("mu_p", "z1", "size", "mu_phi", "log_rho")
+  model_file: "R/nimble_dm"
 
-basic_process:
-  dir_model: "basic_proc"
-  include_proc: TRUE
-  nodes1: !expr c("mu_p", "log_mu1", "tau_p")
+phi_data:
+  phi_static: FALSE
+  phi_config: "data"
 
-basic_process_beta:
-  dir_model: "basic_proc_x"
-  include_proc: TRUE
-  include_beta: TRUE
-  nodes1: !expr c("mu_p", "log_mu1", "tau_p", "beta")
+rho_data:
+  rho_static: FALSE
+  rho_config: "data"
 
-basic_all_pp:
-  dir_model: "basic_all_pp"
-  include_proc: TRUE
-  include_beta: TRUE
+phi_data_rho_data:
+  phi_static: FALSE
+  rho_static: FALSE
+  phi_config: "data"
+  rho_config: "data"
+
+phi_basis_rho_static:
+  phi_static: FALSE
+  rho_static: TRUE
+  phi_config: "basis"
+  nodes1: !expr c("mu_p", "z1", "size", "mu_phi", "log_rho", "beta_p")
+
+phi_static_rho_basis:
+  phi_static: TRUE
+  rho_static: FALSE
+  rho_config: "basis"
+  nodes1: !expr c("mu_p", "z1", "size", "mu_phi", "log_rho", "beta_r")
+
+phi_hb_rho_static:
+  phi_static: FALSE
+  phi_config: "hb"
+  nodes1: !expr c("mu_p", "z1", "size", "mu_phi", "mu_phi_prop", "log_rho", "tau_surv")
+
+lambda_static_nb:
+  dir_out: "out/lambda"
+  phi_static: NULL
+  rho_static: NULL
+  lambda_static: TRUE
+  nb_likelihood: TRUE
   include_all_pp: TRUE
-  nodes1: !expr c("mu_p", "log_mu1", "tau_p", "beta")
+  lambda_config: "static"
+  model_file: "R/nimble_amy"
+  nodes1: !expr c("mu_p", "z1", "size", "tau_p", "log_mean_r")
 
-basic_all_pp_intercept_only:
-  inherits: basic_all_pp
-  dir_model: "basic_all_pp_intercept_only"
-  intercept_only: TRUE
+lambda_static_pois:
+  inherits: lambda_static_nb
+  nb_likelihood: FALSE
 
-basic_all_pp_intercept_only_pkt:
-  inherits: basic_all_pp
-  dir_model: "basic_all_pp_intercept_only_pkt"
-  intercept_only: TRUE
+lambda_data_nb:
+  inherits: lambda_static_nb
+  lambda_static: FALSE
+  lambda_config: "data"
 
-basic_secondary_all_pp_pkt:
-  inherits: basic_all_pp
-  dir_out: "out/secondary_1"
-  dir_model: "basic"
+lambda_data_pois:
+  inherits: lambda_static_nb
+  lambda_static: FALSE
+  nb_likelihood: FALSE
+  lambda_config: "data"
 
-county_secondary_all_pp_pkt:
-  inherits: basic_all_pp
-  dir_out: "out/secondary_1"
-  dir_model: "county"
-  include_county: TRUE
-  nodes1: !expr c("mu_p", "tau_p", "beta", "k")
+lambda_basis_nb:
+  inherits: lambda_static_nb
+  lambda_static: FALSE
+  lambda_config: "basis"
+
+dynamic_multi_method:
+  dir_out: "out/dynamicMultiMethod"
+  model_file: "R/nimble_DynamicMultiMethod"
+  nb_likelihood: TRUE
+  nodes1: !expr c("beta", "mu_p", "size", "sigma_p", "sigma_b", "sigma_l", "logit_p")
