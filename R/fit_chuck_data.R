@@ -5,18 +5,30 @@ library(lubridate)
 library(targets)
 library(coda)
 
-config_name <- "county_secondary_all_pp_pkt"
+config_name <- "dynamic_multi_method"
 
 Sys.setenv(R_CONFIG_ACTIVE = config_name)
 config <- config::get()
 dir_out <- config$dir_out
-dir_model <- config$dir_model
-include_beta <- config$include_beta
-intercept_only <- config$intercept_only
-include_proc <- config$include_proc
-include_county <- config$include_county
-include_all_pp <- config$include_all_pp
-not_include_all_pp <- !include_all_pp
+phi_config <- config$phi_config
+rho_config <- config$rho_config
+lambda_config <- config$lambda_config
+dir_model <- config_name
+nb_likelihood <- if_else(config$nb_likelihood, TRUE, FALSE)
+pois_likelihood <- !nb_likelihood
+phi_static <- config$phi_static
+rho_static <- config$rho_static
+lambda_static <- config$lambda_static
+
+phi_data <- if_else(phi_config == "data", TRUE, FALSE)
+rho_data <- if_else(rho_config == "data", TRUE, FALSE)
+phi_beta <- if_else(phi_config %in% c("basis", "covs"), TRUE, FALSE)
+rho_beta <- if_else(rho_config %in% c("basis", "covs"), TRUE, FALSE)
+
+phi_hb <- if_else(phi_config == "hb", TRUE, FALSE)
+
+lambda_data <- if_else(lambda_config == "data", TRUE, FALSE)
+lambda_beta <- if_else(lambda_config %in% c("basis", "covs"), TRUE, FALSE)
 
 dir_data <- "data"
 
@@ -29,10 +41,10 @@ take_df <- chuck_data |>
          Date = ymd(Date)) |>
   arrange(Property, Date, timestep)
 
-area_csv <- "PropertyAreas.csv"
+area_csv <- "PropertyAreas_2kmBuffer.csv"
 property_areas <- read_csv(file.path(dir_data, area_csv)) |>
-  select(Property, `Area (km2)`) |>
-  rename(area_km2 = `Area (km2)`)
+  select(Property, `With 2km Buffer`) |>
+  rename(area_km2 = `With 2km Buffer`)
 
 dist_cum <- function(var){
   sapply(seq_along(var), function(x) length(unique(head(var, x))))
@@ -50,9 +62,11 @@ passes <- take_df |>
   filter(max(pass) > 1) |>
   arrange(property_idx, timestep, pass) |>
   group_by(property_idx) |>
-  mutate(timestep = timestep - min(timestep) + 1) |>
+  mutate(timestep = timestep - min(timestep) + 1,
+         Effort = if_else(is.na(Effort), 1, Effort)) |>
   filter(max(timestep) > 1) |>
   ungroup() |>
+  mutate(property_idx = as.numeric(as.factor(Property))) |>
   arrange(property_idx, Date, timestep, pass)
 
 all_county_units <- passes |>
@@ -72,19 +86,20 @@ sum_prop_area <- all_county_units |>
   ungroup()
 
 n_prop_county <- all_county_units |>
-  select(County, PPNum, cnty_property) |>
+  mutate(n_idx = 1:n()) |>
+  select(County, PPNum, cnty_property, n_idx) |>
   pivot_wider(names_from = cnty_property,
-              values_from = cnty_property,
+              values_from = n_idx,
               id_cols = c(County, PPNum)) |>
   arrange(County, PPNum) |>
   select(-County, -PPNum) |>
   as.matrix()
 
-n_prop_county1 <- matrix(NA, nrow(n_prop_county), ncol(n_prop_county))
-n_prop <- rep(NA, nrow(n_prop_county))
+n_prop <- apply(n_prop_county, 1, function(x) length(which(!is.na(x))))
+
+n_prop_county1 <- matrix(NA, nrow(n_prop_county), max(n_prop))
 for(i in 1:nrow(n_prop_county)){
   vec <- n_prop_county[i, which(!is.na(n_prop_county[i,]))]
-  n_prop[i] <- length(vec)
   n_prop_county1[i, 1:n_prop[i]] <- vec
 }
 
@@ -115,9 +130,10 @@ pp <- all_county_units |>
   ungroup() |>
   select(Property, timestep, timestep_idx) |>
   pivot_wider(names_from = timestep_idx,
-              values_from = timestep)
+              values_from = timestep,
+              id_cols = Property)
 
-data_ls <- get_site_data(passes)
+data_ls <- suppressWarnings(get_site_data(passes))
 
 ymat <- data_ls$ymat         # take, each row is a spatio-temporal unit (property x primary period), passes in columns
 #ymat[is.na(ymat)] <- -1
@@ -183,16 +199,16 @@ y_removed <- ysum|>
   select(-property_idx) |>
   as.matrix()
 
-n_beta <- if_else(intercept_only, 1, 6)
+
+n_beta <- 6
 
 data <- list(
   y = y,
   y_removed = y_removed,
   effort = gbe |> select(-ts, -Property) |> as.matrix(),
   gamma = Areaper |> select(-ts, -Property) |> as.matrix(),
-  X = Xd |> select(-ts, -Property) |> as.matrix(),
-  Xall = Xd_all |> select(-ts, -Property) |> as.matrix(),
-  Xk = cbind(rep(1, 3), matrix(rnorm(9), 3, 3))
+  # X = Xd |> select(-ts, -Property) |> as.matrix(),
+  Xall = Xd_all |> select(-ts, -Property) |> as.matrix()
 )
 
 property <- take |> pull(Property) |> as.factor() |> as.numeric()
@@ -201,10 +217,21 @@ county <- sum_prop_area |> pull(County) |> as.factor() |> as.numeric()
 n_county <- max(county)
 n_timestep <- take |> group_by(Property) |> tally() |> pull(n)
 
-methods <- methods |>
+methods_mat <- methods |>
   select(-ts, -Property) |>
   as.matrix()
-n_methods <- max(methods, na.rm = TRUE)
+n_methods <- max(methods_mat, na.rm = TRUE)
+
+phi_prior <- c(3.294963, 0.4520253)
+
+# par(mfrow = c(2,2))
+# n <- 10000
+# xlim = c(0.5, 1)
+# var(ilogit(rnorm(n, phi_prior[1], phi_prior[2])))
+# var(ilogit(rnorm(n, phi_prior[1], phi_prior[2]*2)))
+# var(ilogit(rnorm(n, phi_prior[1], phi_prior[2]*5)))
+# var(ilogit(rnorm(n, phi_prior[1], phi_prior[2]*12)))
+
 
 constants <- list(
   n_units = nrow(ymat),
@@ -217,50 +244,52 @@ constants <- list(
   n_beta = n_beta,
   n_county_units = nrow(sum_prop_area),
   n_pc = n_pc,
+  n_monitor = nrow(take),
   property = property,
   county = county,
   countyN = all_county_units |> pull(county_idx),
   timestep = take$timestep,
   property_x = Xd_all |> pull(Property) |> as.factor() |> as.numeric(),
   timestep_x = Xd_all |> pull(ts),
-  method = methods,
-  pp = pp |> select(-Property) |> as.matrix(),
+  method = methods_mat,
+  pp = pp |> select(-Property) |> as.matrix(), # will need to reparamaterize to fit nimble code
   nt = max(n_timestep),
   pp_c = pp_c,
   maxp = max(pp_c),
-  n_prop_cnty = n_prop_county1,
+  M_lookup = n_prop_county1,
   n_prop = n_prop,
   cnty_property = all_county_units |> pull(cnty_property),
   PPNum = all_county_units |> pull(PPNum),
   sum_prop_area = sum_prop_area |> pull(sum_area),
   county_area = county_areas$area_km2,
-  k_mu = rep(0, 4),
-  k_cov = diag(1, 4, 4)
+  phi_prior = phi_prior,
+  property_m = take$property_idx,
+  timestep_m = take$timestep,
+  alpha_p = 1,
+  beta_p = 1,
+  alpha_b = 1,
+  beta_b = 1,
+  alpha_l = 1,
+  beta_l = 1
 )
 
-lambda_monitor <- n_monitor <- m_monitor <- vector()
-for(i in 1:n_property){
-  for(t in 1:n_timestep[i]){
-    ll <- paste0("log_lambda[", i, ", ", t, "]")
-    lambda_monitor <- c(lambda_monitor, ll)
-    nn <- paste0("n[", i, ", ", t, "]")
-    n_monitor <- c(n_monitor, nn)
-  }
-}
-
-
 inits <- function(){
+  mu_p <- rnorm(1)
+  sigma_p <- runif(1)
+  sigma_b <- runif(1)
+  sigma_l <- runif(1)
+  logit_p <- rnorm(n_methods, mu_p, sigma_p)
+  n_init <- round(y_removed / min(boot::inv.logit(logit_p)))
   list(
-    n = y_removed + rpois(1, 10),
-    # M = (y_removed + rpois(1, 10))*rpois(1, 3),
-    log_mu1 = log(rowSums(data$y_removed, na.rm = TRUE)),
-    log_mu_proc = log(y_removed + 10),
-    log_lambda = log(matrix(runif(n_property * max(n_timestep), 0.01, 1), n_property, max(n_timestep))),
-    tau_p = runif(1, 0, 2),
-    beta = matrix(rnorm(n_property * n_beta), n_property, n_beta),
-    mu_p = matrix(runif(n_methods*max(n_timestep), 0, 1), n_methods, max(n_timestep)),
-    size = runif(3, 0.01, 5)
-    # beta_k = rnorm(4)
+    n = n_init,
+    z1 = log(n_init[,1]),
+    mu_p = mu_p,
+    logit_p = logit_p,
+    sigma_p = sigma_p,
+    sigma_l = sigma_l,
+    sigma_b = runif(1),
+    beta = rnorm(n_beta, 0, sigma_b),
+    size = runif(n_county, 0, 5)
   )
 }
 
@@ -270,53 +299,64 @@ str(constants)
 str(inits_test)
 
 # options(error = recover)
-source("R/nimble_amy.R")
 source("R/functions_nimble.R")
+source("R/nimble_DynamicMultiMethod.R")
 Rmodel <- nimbleModel(
   code = modelCode,
   constants = constants,
-  inits = inits_test,
+  # inits = inits_test,
+  inits = inits(),
   data = data
 )
-
+# Rmodel$n
+# Rmodel$n - y_removed
 
 # warnings()
 # check initialization
 Rmodel$initializeInfo()
 
+Cmodel <- compileNimble(Rmodel)
+Cmodel$calculate()
+
 # default MCMC configuration
-mcmcConf_conj <- configureMCMC(Rmodel, useConjugacy = TRUE)
-# mcmcConf_no_conj <- configureMCMC(Rmodel, useConjugacy = FALSE)
-mcmcConf <- mcmcConf_conj
-mcmcConf$addMonitors(c("n", "M", "size"))
-# these print statements will not display when running in parallel
-# mcmcConf$printMonitors()
-# mcmcConf$printSamplers(byType = TRUE)
+mcmcConf <- configureMCMC(Cmodel, useConjugacy = TRUE)
+
+mcmcConf$addMonitors(c("xn", "M", "beta", "logit_p", "N_mu", "M_mu"))
+# if(phi_hb) mcmcConf$addMonitors(c("mu_phi_prop"))
+
+# mcmcConf$removeSampler("n")
 
 Rmcmc <- buildMCMC(mcmcConf)
-Cmodel <- compileNimble(Rmodel)
 Cmcmc <- compileNimble(Rmcmc)
 
-n_iter <- 5e5
+n_iter <- 250000
 n_chains <- 3
 
 samples <- runMCMC(
   Cmcmc,
-  nburnin = n_iter/2,
+  nburnin = round(n_iter/2),
+  thin = 1,
   niter = n_iter,
   nchains = n_chains,
   samplesAsCodaMCMC = TRUE
 )
 
-ss <- as.matrix(samples)
-hist(ss[,"N_disp[3]"])
-hist(ss[,"M[3]"])
-hist(ss[,"beta_k[1]"])
-hist(ss[,"beta_k[2]"])
-hist(ss[,"size[1]"])
-hist(ss[,"size[2]"])
-hist(ss[,"size[3]"])
+# plot(samples)
 
+ss <- as.matrix(samples)
+# par(mfrow = c(2,2))
+# hist(ss[,"M[3]"])
+# hist(ss[,"M[6]"])
+# hist(ss[,"M[9]"])
+# hist(ss[,"n[1, 2]"])
+# hist(ss[,"size[1]"])
+# hist(ss[,"size[2]"])
+# hist(ss[,"size[3]"])
+# hist(ilogit(ss[,"mu_p[1]"]))
+# hist(ilogit(ss[,"mu_p[2]"]))
+# hist(ilogit(ss[,"mu_p[3]"]))
+# hist(ss[,"z1[1]"])
+# hist(ss[,"beta[1]"])
 
 # check convergence and effective sample size on specified node
 subset_check_mcmc <- function(node){
@@ -353,20 +393,17 @@ subset_check_burnin <- function(node, plot = FALSE){
   return(burnin)
 }
 
-nodes1 <- c(config$nodes1, "size")
-nodes2 <- n_monitor
-if(config_name %in% c("default", "basic_process")){
-  nodes2 <- c(nodes2, lambda_monitor)
-}
-
-nodes_check <- c(nodes1, nodes2)
+nodes_check <- config$nodes1
 
 mcmc <- samples
-checks <- map_dfr(lapply(nodes_check, subset_check_mcmc), as.data.frame)
-checks
 
+message("PSRF")
+checks <- map_dfr(lapply(nodes_check, subset_check_mcmc), as.data.frame)
+print(checks)
+
+message("Burnin")
 burnin <- map_dbl(lapply(nodes_check, subset_check_burnin), as.vector)
-burnin
+print(burnin)
 max(burnin, na.rm = TRUE)
 
 samples_burn <- window(samples, start = max(burnin, na.rm = TRUE))
@@ -389,6 +426,7 @@ property_lookup <- passes |>
   ungroup() |>
   left_join(property_idxs)
 
+print(warnings())
 
 path <- file.path(dir_out, dir_model)
 print(path)
@@ -403,12 +441,11 @@ write_rds(
     property_lookup = property_lookup,
     all_county_units = all_county_units,
     county_level_lookup = sum_prop_area |> mutate(m_idx = 1:n()),
-    nodes1 = nodes1,
-    nodes2 = nodes2
+    nodes1 = config$nodes1
+    # nodes2 = nodes2
   ),
   file.path(path, "samples.rds")
 )
-
 
 
 
