@@ -16,13 +16,13 @@ dir_read <- "properties"
 # ) |>
 #   suppressMessages()
 
-all_chuck <- read_csv(file.path(dir_data, "Data_for_John.csv"))
+# all_chuck <- read_csv(file.path(dir_data, "Data_for_John.csv"))
+all_chuck <- read_csv(file.path(dir_data, "all_chuck_data.csv"))
 
 chuck_data <- all_chuck |>
   mutate(Date = parse_date_time(Date, c("mdy", 'mdyHM')),
          Month = month(Date),
-         year = year(Date)) |>
-  select(-pp_end_date, -pp_start_date)
+         year = year(Date))
 
 min_date <- ymd(min(chuck_data$Date))
 max_date <- ymd(max(chuck_data$Date))
@@ -58,7 +58,7 @@ pp_table <- tibble(
   pp_start_date = start_dates,
   pp_end_date = end_dates
 ) |>
-  arrange(pp_start_date, pp_end_date) |>
+  arrange(pp_start_date) |>
   mutate(PPNum = 1:n())
 
 all_chuck_data <- chuck_data |>
