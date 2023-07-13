@@ -1,43 +1,15 @@
 ## functions to simulate pig population abundance
 
-# n_county <- 3
-# n_property_per_county <- 5 # number of properties in each county
-# n_property <- n_property_per_county * n_county
-# n_pp <- 10
-# n_passes <- 5
-#
-# county_areas_low <- runif(n_county, 100, 999)
-# county_areas_mid <- runif(n_county, 999, 4999)
-# county_areas_high <- runif(n_county, 5000, 9999)
-#
-# get_property_areas <- function(county_areas){
-#   property_areas <- matrix(NA, n_county, n_property_per_county)
-#   for(i in 1:n_county){
-#     pa <- runif(n_property_per_county, 20, county_areas[i]*0.8)
-#     while(sum(pa) > county_areas[i]*0.8){
-#       pa <- runif(n_property_per_county, 20, county_areas[i]*0.8)
-#     }
-#     property_areas[i, ] <- pa
-#   }
-#   property_areas
-# }
-#
-# property_areas_low <- get_property_areas(county_areas_low)
-# property_areas_mid <- get_property_areas(county_areas_mid)
-# property_areas_high <- get_property_areas(county_areas_high)
+mu_p <- -2.2
+sigma_l <- 0.2
+sigma_p <- 0.6
+sigma_b <- 0.1
+size <- seq(0.5, 5, length.out = n_county)
 
-simulate_swine <- function(process,
-                           likelihood,
-                           r_c,
-                           phi,
-                           rho,
-                           beta,
-                           x1,
-                           x2,
-                           alpha_p,
-                           sigma_proc,
+simulate_swine <- function(mu_p,
+                           sigma_l,
                            sigma_p,
-                           p,
+                           sigma_b,
                            size,
                            effort,
                            method,
@@ -46,173 +18,173 @@ simulate_swine <- function(process,
 ){
 
 
-  county_areas_low <- c(451.16, 891.04, 688.15)
-  county_areas_mid <- c(4643.96, 2645.81, 2759.02)
-  county_areas_high <- c(6797.46, 7412.5, 9148.72)
-
+  county_areas <- c(1451.16, 1891.04, 1688.15)
   property_area <- c(9.73, 73.84, 74.81, 81.48, 30.75, 28.72, 62.85, 22.27, 47.77,
                      86.45, 67.69, 69.71, 40.28, 13.01, 71.96)
-
-  # the area not sampled in each county
-  unsampled <- function(ca, pa){
-    c(ca[1] - sum(pa[1:6]),
-      ca[2] - sum(pa[7:12]),
-      ca[3] - sum(pa[13:18]))
-  }
-
-  # the unsampled area is the area of the completely latent property
-  unsampled_low <- unsampled(county_areas_low, property_area)
-  unsampled_mid <- unsampled(county_areas_mid, property_area)
-  unsampled_high <- unsampled(county_areas_high, property_area)
-  U <- matrix(c(unsampled_low, unsampled_mid, unsampled_high), 3, 3)
-
-  P <- matrix(property_area, 6, 3)
+  PA <- matrix(property_area, n_county, n_property_per_county, byrow = TRUE)
+  PC <- matrix(1:n_property, n_county, n_property_per_county, byrow = TRUE)
 
   # constants
   n_county <- 3 # number of counties
-  n_property_per_county <- 10 # number of properties within each county
+  n_property_per_county <- 5 # number of properties within each county
   n_pp <- 10 # number of primary periods
   n_passes <- 5 # number of removals per sampled primary period
   n_method <- 3 # number of removal methods
   n_property <- n_property_per_county * n_county # total number of properties
-  n_units <- n_property_per_county*n_pp # total number of spatio-temporal units
+  n_units <- n_property*n_pp # total number of spatio-temporal units
   n_removals <- n_units*n_passes - n_county*n_passes*n_pp # total number of removal events
 
-  unit <- matrix(1:n_units, n_property_per_county, n_pp, byrow = TRUE)
+  unit <- matrix(1:n_units, n_property, n_pp, byrow = TRUE)
   county <- rep(1:3, each = n_property_per_county)
 
+  Xdat <- cbind(1, 1:n_pp/n_pp)
+  X <- cbind(1, bs(Xdat[,2], 5))
+
+  logit_p <- rnorm(n_method, mu_p, sigma_p)
+  p <- ilogit(logit_p)
+  beta <- rnorm(ncol(X), 0, sigma_b)
+  alpha <- rnorm(n_property, 0, 1)
+
   # initial density of pigs in each county
-  # max density of pigs is 10 km^2
-  M_low <- round(county_areas_low*10)
-  M_mid <- round(county_areas_mid*10)
-  M_high <- round(county_areas_high*10)
-  M_vec <- c(M_low, M_mid, M_high)
-  M1 <- matrix(M_vec, 3, 3)
+  # density of pigs is 7 km^2
+  M <- matrix(NA, n_county, n_pp)
+  M[,1] <- round(county_areas*7)
+  M_avail <- M
+  N <- matrix(NA, n_property, n_pp)
+  C <- matrix(NA, n_units, n_passes)      # counts
+  removed <- matrix(NA, n_property, n_pp) # number removed
 
-  initial_n <- function(M, pa, u){
-    area_vec <- c(pa, u)
-    N <- rmultinom(1, M, area_vec / sum(area_vec))
-    as.vector(N)
-  }
+  for(i in 1:n_county){
+    for(t in 1:n_pp){
 
-  proportion_surveyed <- c("low", "med", "high")
+      # property areas for county
+      pi_n <- PA[i, ]
 
-  # loop over area scenarios
-  out <- list()
-  for(s in 1:3){
+      # proportion of county sampled in PP
+      phi <- sum(pi_n) / county_areas[i]
 
-    # storage
-    XN <- N <- matrix(NA, n_property_per_county, n_pp)       # latent abundance [property, primary period] w/ stochasticity
-    x <- matrix(NA, n_property_per_county, n_pp)       # expected log abundance
-    M <- EM <- matrix(NA, n_county, n_pp)
-    C <- matrix(NA, n_units, n_passes)      # counts
-    removed <- matrix(NA, n_property_per_county, n_pp) # number removed
-    N_all <- tibble()
-    H <- matrix(1:n_property, n_property_per_county, n_county)
+      # the number of pigs available to be captured
+      M_avail[i, t] <- rbinom(1, M[i, t], phi)
 
-    # simulate dynamics
-    for(c in 1:n_county){
+      # place available pigs into properties based on property size
+      N[PC[i,], t] <- rmultinom(1, M_avail[i, t], pi_n)
 
-      EX <- initial_n(M1[c, s], P[,c], U[c, s])
-      M[c, 1] <- sum(EX)
-      EM[c, 1] <- sum(EX)
-      N[,1] <- EX
-      XN[,1] <- EX
-      x[,1] <- log(EX)
+      # data model - determine take
+      # determine which properties are sampled
+      properties_sampled <- PC[i, which(!is.na(sample_occ[PC[i,], t]))]
 
-      for(j in 1:n_pp){
-        for(i in seq_len(n_property_per_county)){
-
-          # if a removal occasion, determine how many pigs removed
-          if(j %in% sample_occ[H[j, county[i]],]){
-            theta <- rep(NA, n_passes)
-            for(l in 1:n_passes){
-              theta[l] <- 1 - (1 - p[method[unit[i, j], l]]) ^ effort[unit[i, j], l]
-              if(l == 1){
-                p_star <- gamma[unit[i, j], l] * theta[l]
-                N_avail <- EX[i]
-              } else {
-                p_star <- gamma[unit[i, j], l] * theta[l] *
-                  exp(
-                    sum(
-                      log(
-                        (1 - gamma[unit[i, j], 1:(l - 1)]) +
-                          (gamma[unit[i, j], 1:(l - 1)] * (1 - theta[1:(l - 1)]))
-                      )
-                    )
-                  )
-                N_avail <- EX[i] - sum(C[unit[i, j], 1:(l-1)])
-              }
-
-              if(p_star >= 1) stop("Observation rate greater than 1!")
-
-              ex_removed <- p_star * N_avail + 0.1
-              if(likelihood == "deterministic"){
-                C[unit[i, j], l] <- round(ex_removed)
-              } else if(likelihood == "poisson"){
-                # for the random draws use min so we don't remove more than available
-                C[unit[i, j], l] <- min(rpois(1, ex_removed), N_avail)
-              } else if(likelihood == "nb"){
-                C[unit[i, j], l] <- min(rnbinom(1, size = ex_removed, prob = 0.2), N_avail)
-              }
-
-            }
-            removed[i, j] <- sum(C[unit[i, j], ])
+      for(j in seq_along(properties_sampled)){
+        prop <- properties_sampled[j]
+        theta <- rep(NA, n_passes)
+        for(l in seq_len(n_passes)){
+          theta[l] <- 1 - (1 - p[method[unit[prop, t], l]]) ^ effort[unit[prop, t], l]
+          if(l == 1){
+            p_star <- gamma[unit[prop, t], l] * theta[l]
+            N_avail <- N[prop, t]
           } else {
-            removed[i, j] <- NA
+            p_star <- gamma[unit[prop, t], l] * theta[l] *
+              exp(
+                sum(
+                  log(
+                    (1 - gamma[unit[prop, t], 1:(l - 1)]) +
+                      (gamma[unit[prop, t], 1:(l - 1)] * (1 - theta[1:(l - 1)]))
+                  )
+                )
+              )
+            N_avail <- N[prop, t] - sum(C[unit[prop, t], 1:(l-1)])
           }
 
-          z <- EX[i] - if_else(is.na(removed[i, j]), 0, removed[i, j])
-          if(z < 0) stop("Number removed more than population!")
+          if(p_star >= 1) stop("Observation rate greater than 1!")
 
-          if(j < n_pp){
-            growth <- exp(log(r_c[county[i]]) +
-                            beta[1]*x1[county[i], j] +
-                            beta[2]*x2[county[i], j] +
-                            alpha_p[i])
-            log_mu <- log(growth) + log(z)
-            x[i, j+1] <- rnorm(1, log_mu, sigma_proc) # add process error
-            N[i, j+1] <- rpois(1, exp(x[i, j+1]))     # add stochasticity
-
-          }
-        }
-
-        if(j < n_pp){
-          M[c, j+1] <- sum(N[i, j+1]) + 0.1
-          EM[c, j+1] <- rnbinom(1, M[c, j+1], 0.2)
-          # EM[c, j+1] <- rpois(1, EM[c, j] * r_c[county[i]])
-          EX <- initial_n(EM[c, j+1], P[,c], U[c, s])
+          # for the random draws use min so we don't remove more than available
+          C[unit[prop, t], l] <- min(rpois(1, p_star * N_avail), N_avail)
+          removed[prop, t] <- sum(C[unit[prop, t], ])
         }
       }
-      colnames(N) <- as.character(1:10)
-      N_all <- bind_rows(N_all, as_tibble(N))
+
+      if(t < n_pp){
+        # determine growth rate
+        log_lambda_mu <- inprod(X[t,], beta)
+        log_lambda <- rnorm(1, log_lambda_mu, sigma_l)
+        z <- M[i, t] - sum(removed[PC[i,], t], na.rm = TRUE)
+
+        # predict
+        M[i, t+1] <- rpois(1, exp(log(z) + log_lambda))
+      }
+
     }
+  }
 
+  for(i in 1:n_county){
+    plot(log(M[i,]+1), type = "l", ylim = c(0, max(log(M[i,]+1))))
+    for(j in 1:n_property_per_county) lines(log(N[PC[i, j],]+1), col = j+1)
+  }
 
+  colnames(M) <- 1:n_pp
+  colnames(N) <- 1:n_pp
+  colnames(C) <- 1:n_passes
 
-    N_sums <- tibble(
-      county_1 = colSums(N[1:6,]),
-      county_2 = colSums(N[7:12,]),
-      county_3 = colSums(N[13:18,])
-    ) |>
-      mutate(PPNum = 1:n()) |>
-      pivot_longer(cols = -PPNum,
-                   names_to = "County",
-                   values_to = "sumAbundance") |>
-      mutate(proportion_surveyed = proportion_surveyed[s])
+  M_long <- M |>
+    as_tibble() |>
+    mutate(County = 1:n()) |>
+    pivot_longer(cols = -County,
+                 values_to = "County_abundance",
+                 names_to = "PPNum")
 
-    colnames(C) <- paste0("V", 1:n_passes)
+  N_long <- N |>
+    as_tibble() |>
+    mutate(County = rep(1:n_county,
+                        each = n_property_per_county),
+           Property = 1:n()) |>
+    pivot_longer(cols = -c(County, Property),
+                 values_to = "Property_abundance",
+                 names_to = "PPNum")
 
-    y <- C |>
-      as_tibble() |>
-      mutate(County = rep(1:n_county, each = n_property_per_county*n_pp),
-             Property = rep(1:n_property, each = n_pp),
-             Property_county = rep(rep(1:n_property_per_county, each = n_pp), n_county),
-             PPNum = rep(rep(1:n_pp), n_county*n_property_per_county))
+  prop_area_df <- tibble(
+    area_property = property_area,
+    Property = 1:length(property_area)
+  )
 
-    keep1 <- which(!is.na(y$V1))
-    keep2 <- which(y$Property %in% c(6, 12, 18))
-    keep_index <- sort(c(keep1, keep2))
+  county_area_df <- tibble(
+    area_county = county_areas,
+    County = 1:length(county_areas)
+  )
+
+  take <- C |>
+    as_tibble() |>
+    mutate(County = rep(1:n_county, each = n_property_per_county*n_pp),
+           Property = rep(1:n_property, each = n_pp),
+           Property_county = rep(rep(1:n_property_per_county, each = n_pp), n_county),
+           PPNum = rep(rep(1:n_pp), n_county*n_property_per_county)) |>
+    left_join(prop_area_df) |>
+    left_join(county_area_df)
+
+  # keep1 <- which(!is.na(y$`1`))
+
+  y <- take |>
+    filter(!is.na(`1`))
+
+  county_pp_samples <- y |>
+    select(County, PPNum) |>
+    distinct() |>
+    group_by(County) |>
+    mutate(timestep = 1:n()) |>
+    ungroup() |>
+    pivot_wider(names_from = timestep,
+                values_from = PPNum)
+
+  county_pp_samples_mat <- county_pp_samples |>
+    select(-County) |>
+    as.matrix()
+
+  start_pp <- county_pp_samples_mat[,1]
+  end_pp <- apply(county_pp_samples_mat, 1, function(x) max(which(!is.na(x))))
+
+  y |>
+    select(County, Property, PPNum, area_property) |>
+    pivot_wider(values_from = area_property,
+                )
+
 
     n_timestep <- y |>
       slice(keep1) |>
@@ -233,17 +205,7 @@ simulate_swine <- function(process,
       mutate(obs_id = paste(Property, PPNum, sep = "_")) |>
       pull(obs_id)
 
-    N_long <- N |>
-      as_tibble() |>
-      mutate(County = rep(1:n_county,
-                          each = n_property_per_county),
-             Property = 1:n()) |>
-      pivot_longer(cols = -c(County, Property),
-                   values_to = "Property_abundance",
-                   names_to = "PPNum") |>
-      mutate(obs_id = paste(Property, as.numeric(PPNum), sep = "_")) |>
-      # filter(obs_id %in% p_obs_id) |>
-      select(-obs_id)
+
 
     n_pc <- y |>
       group_by(County, PPNum) |>
@@ -272,13 +234,6 @@ simulate_swine <- function(process,
       select(-County, -PPNum) |>
       as.matrix()
 
-    n_prop_county1 <- matrix(NA, nrow(npc), ncol(npc))
-    n_prop <- rep(NA, nrow(npc))
-    for(i in 1:nrow(npc)){
-      vec <- npc[i, which(!is.na(npc[i,]))]
-      n_prop[i] <- length(vec)
-      n_prop_county1[i, 1:n_prop[i]] <- vec
-    }
 
     y_removed <- matrix(NA, nrow(removed), ncol(removed))
     for(i in 1:nrow(removed)){
