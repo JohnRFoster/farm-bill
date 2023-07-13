@@ -100,6 +100,7 @@ modelCode <- nimbleCode({
     # re-parametrization with mean abundance
     pM[i] <- size[county[i]] / (M_mu[i] + size[county[i]])
 
+
     # convert abundance to density (across properties), scale to county abundance
     M_mu[i] <- N_mu[i] / sum_prop_area[i] * county_area[county[i]]
 
