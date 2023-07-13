@@ -29,7 +29,7 @@ dail_madsen_experiments <- expand_grid(
 )
 
 n_county <- 3 # number of counties
-n_property_per_county <- 10 # number of properties within each county
+n_property_per_county <- 5 # number of properties within each county
 n_pp <- 10 # number of primary periods
 n_passes <- 5 # number of removals per sampled primary period
 n_method <- 3 # number of removal methods
@@ -64,11 +64,11 @@ for(i in 1:n_property){
 # determine which primary periods are sampled for each property
 sample_occ <- matrix(NA, n_property, n_pp)
 for(i in seq_len(n_property)){
-  n_samps <- round(runif(1, 5.6, n_pp - 0.6))
+  n_samps <- round(runif(1, 4.6, n_pp - 1.6))
   s <- sample(n_pp, n_samps)
-  sample_occ[i, seq_along(s)] <- s
+  sample_occ[i, sort(s)] <- sort(s)
 }
-sample_occ[c(7:10, 17:20, 27:30),] <- NA
+# sample_occ[c(7:10, 17:20, 27:30),] <- NA
 
 
 #### need to loop over overdispersion, area group, and likelihood for mcmc fits
