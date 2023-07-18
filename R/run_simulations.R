@@ -64,7 +64,7 @@ for(i in 1:n_property){
 # determine which primary periods are sampled for each property
 sample_occ <- matrix(NA, n_property, n_pp)
 for(i in seq_len(n_property)){
-  n_samps <- round(runif(1, 4.6, n_pp - 1.6))
+  n_samps <- round(runif(1, 4, n_pp - 2))
   s <- sample(n_pp, n_samps)
   sample_occ[i, sort(s)] <- sort(s)
 }
