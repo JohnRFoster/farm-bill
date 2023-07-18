@@ -4,11 +4,8 @@ library(nimble)
 library(lubridate)
 library(targets)
 library(coda)
-
-
-
-
-
+library(reshape2)
+library(splines)
 
 fit_simulated_data <- function(data_simulate, inits, lambda_config, likelihood, process){
 
