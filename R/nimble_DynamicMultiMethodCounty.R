@@ -23,7 +23,6 @@ modelCode <- nimbleCode({
   sigma_l ~ dinvgamma(alpha_l, beta_l)
   tau_l <- 1/sigma_l^2
 
-
   # county level process model
   for(i in 1:n_county){
 
@@ -32,29 +31,35 @@ modelCode <- nimbleCode({
     log(mu[i, start_pp[i]]) <- z1[i]
     z1[i] ~ dunif(0, 15)
 
-    for(t in (start_pp[i]+1):n_pp[i]){
+    M_avail[i, start_pp[i]] ~ dbinom(proportion_surveyed[i, start_pp[i]], M[i, start_pp[i]])
+    n[PC[i, start_pp[i]]:PC[i, n_prop[i]], start_pp[i]] ~ dmulti(PA[i, 1:n_prop[i]], M_avail[i, start_pp[i]])
+
+    for(t in (start_pp[i]+1):end_pp[i]){
 
       M[i, t] ~ dpois(mu[i, t])
       log(mu[i, t]) <- log_lambda[i, t] + log(z[i, t])
       z[i, t] <- M[i, t-1] - y_removed[i, t-1]
       log_lambda[i, t] <- sum(log_lambda_all[i, pp[i, t-1]:(pp[i, t]-1)])
 
-      M_avail[i, t] ~ dbinom(M[i, t], proportion_surveyed[i, t])
-      n[PC[i, 1:n_prop[i]], t] ~ dmulti(M_avail[i, t], property_areas[PC[i, 1:n_prop[i]], t])
+      M_avail[i, t] ~ dbinom(proportion_surveyed[i, t], M[i, t])
+      n[PC[i, 1]:PC[i, n_prop[i]], t] ~ dmulti(PA[i, 1:n_prop[i]], M_avail[i, t])
 
     }
   }
 
   # calculate log growth rate across timesteps
   for(i in 1:n_units_all){
-    log_lambda_mu[county_x[i], pp_x[i]] <- inprod(Xall[i, 1:n_beta], beta[1:n_beta])
+    log_lambda_mu[county_x[i], pp_x[i]] <- inprod(X[i, 1:n_beta], beta[1:n_beta])
     log_lambda_all[county_x[i], pp_x[i]] ~ dnorm(log_lambda_mu[county_x[i], pp_x[i]], tau = tau_l)
   }
 
   for(i in 1:n_units){
 
+    # long format for easier monitoring
+    xn[i] <- n[property[i], PPNum[i]]
+
     # likelihood - first pass
-    lam[i, 1] <- pi[i, 1] * n[property[i], timestep[i]] ## TODO align N by primary period - NOT TIMESTEP
+    lam[i, 1] <- pi[i, 1] * n[property[i], PPNum[i]]
     y[i, 1] ~ dpois(lam[i, 1])
 
     pi[i, 1] <- gamma[i, 1] * theta[i, 1]
@@ -63,7 +68,7 @@ modelCode <- nimbleCode({
     for(j in 2:n_passes[i]){
 
       # likelihood - subsequent passes
-      lam[i, j] <- pi[i, j] * n[property[i], timestep[i]]
+      lam[i, j] <- pi[i, j] * n[property[i], PPNum[i]]
       y[i, j] ~ dpois(lam[i, j])
 
       pi[i, j] <- gamma[i, j] * theta[i, j] *
@@ -73,12 +78,6 @@ modelCode <- nimbleCode({
     }
 
   }
-
-  # long format for easier monitoring
-  for(i in 1:n_monitor){
-    xn[i] <- n[property_m[i], timestep_m[i]] ## TODO change timestep_m to an index for primary period
-  }
-
 
 })
 
