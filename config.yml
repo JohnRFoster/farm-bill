@@ -76,3 +76,8 @@ dynamic_multi_method:
   model_file: "R/nimble_DynamicMultiMethod"
   nb_likelihood: TRUE
   nodes1: !expr c("beta", "mu_p", "size", "sigma_p", "sigma_b", "sigma_l", "logit_p")
+
+dynamic_multi_method_poisson:
+  inherits: dynamic_multi_method
+  nb_likelihood: FALSE
+
