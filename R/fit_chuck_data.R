@@ -5,7 +5,7 @@ library(lubridate)
 library(targets)
 library(coda)
 
-config_name <- "dynamic_multi_method"
+config_name <- "dynamic_multi_method_poisson"
 
 Sys.setenv(R_CONFIG_ACTIVE = config_name)
 config <- config::get()
@@ -321,7 +321,7 @@ Cmodel$calculate()
 # default MCMC configuration
 mcmcConf <- configureMCMC(Cmodel, useConjugacy = TRUE)
 
-mcmcConf$addMonitors(c("xn", "M", "beta", "logit_p", "N_mu", "M_mu"))
+mcmcConf$addMonitors(c("xn", "M", "beta", "logit_p", "N_mu"))
 # if(phi_hb) mcmcConf$addMonitors(c("mu_phi_prop"))
 
 # mcmcConf$removeSampler("n")
@@ -329,82 +329,54 @@ mcmcConf$addMonitors(c("xn", "M", "beta", "logit_p", "N_mu", "M_mu"))
 Rmcmc <- buildMCMC(mcmcConf)
 Cmcmc <- compileNimble(Rmcmc)
 
-n_iter <- 250000
+n_iter <- 120000
 n_chains <- 3
 
 samples <- runMCMC(
   Cmcmc,
-  nburnin = round(n_iter/2),
+  nburnin = 0,
   thin = 1,
   niter = n_iter,
   nchains = n_chains,
   samplesAsCodaMCMC = TRUE
 )
 
-# plot(samples)
-
-ss <- as.matrix(samples)
-# par(mfrow = c(2,2))
-# hist(ss[,"M[3]"])
-# hist(ss[,"M[6]"])
-# hist(ss[,"M[9]"])
-# hist(ss[,"n[1, 2]"])
-# hist(ss[,"size[1]"])
-# hist(ss[,"size[2]"])
-# hist(ss[,"size[3]"])
-# hist(ilogit(ss[,"mu_p[1]"]))
-# hist(ilogit(ss[,"mu_p[2]"]))
-# hist(ilogit(ss[,"mu_p[3]"]))
-# hist(ss[,"z1[1]"])
-# hist(ss[,"beta[1]"])
-
-# check convergence and effective sample size on specified node
-subset_check_mcmc <- function(node){
-  s <- mcmc[,grep(node, colnames(mcmc[[1]]), value = TRUE, fixed = TRUE)]
-  df <- data.frame(
-    psrf = gelman.diag(s, multivariate = FALSE)$psrf[,2], # checking the upper CI
-    effective_samples = effectiveSize(s)
-  )
-  if(is.null(dim(s$chain1))) rownames(df) <- node
-  return(df)
-}
-
-subset_check_burnin <- function(node, plot = FALSE){
-  s <- mcmc[,grep(node, colnames(mcmc[[1]]), value = TRUE, fixed = TRUE)]
-  if(plot){
-    GBR <- gelman.plot(s)
-  } else {
-    ff <- tempfile()
-    png(filename = ff)
-    GBR <- gelman.plot(s)
-    dev.off()
-    unlink(ff)
-  }
-  shrink <- GBR$shrink[, , 2]
-  if(all(shrink < 1.1)){
-    burnin <- 1
-  } else {
-    if(is.null(dim(s$chain1))){
-      burnin <- GBR$last.iter[tail(which(shrink > 1.1), 1) + 1]
-    } else {
-      burnin <- GBR$last.iter[tail(which(apply(shrink > 1.1, 1, any)), 1) + 1]
-    }
-  }
-  return(burnin)
-}
-
 nodes_check <- config$nodes1
+all_nodes <- colnames(samples[[1]])
+j <- unlist(lapply(nodes_check, function(x) grep(x, all_nodes)))
 
-mcmc <- samples
+params <- samples[,j]
 
-message("PSRF")
-checks <- map_dfr(lapply(nodes_check, subset_check_mcmc), as.data.frame)
-print(checks)
+dest <- file.path(dir_out, dir_model, if_else(config$nb_likelihood, "negbinom", "poisson"))
+print(dest)
+if(!dir.exists(dest)) dir.create(dest, recursive = TRUE, showWarnings = FALSE)
 
-message("Burnin")
-burnin <- map_dbl(lapply(nodes_check, subset_check_burnin), as.vector)
+message("Creating traceplots...")
+png(filename = file.path(dest, "mcmcTimeseries%03d.png"))
+plot(params)
+dev.off()
+message("  done")
+
+message("Calculating PSRF...")
+psrf <- gelman.diag(params, multivariate = FALSE)
+print(psrf)
+
+message("Calculating effective samples...")
+effective_samples <- effectiveSize(params)
+print(effective_samples)
+
+message("Calculating burnin...")
+ff <- tempfile()
+png(filename = ff)
+GBR <- gelman.plot(params)
+dev.off()
+unlink(ff)
+
+burnin <- GBR$last.iter[tail(which(apply(GBR$shrink[, , 2] > 1.1, 1, any)), 1) + 1]
 print(burnin)
-max(burnin, na.rm = TRUE)
+
+if(is.na(burnin)) burnin <- 85000
+
 
 samples_burn <- window(samples, start = max(burnin, na.rm = TRUE))
 
@@ -428,10 +400,6 @@ property_lookup <- passes |>
 
 print(warnings())
 
-path <- file.path(dir_out, dir_model)
-print(path)
-if(!dir.exists(path)) dir.create(path, recursive = TRUE, showWarnings = FALSE)
-
 write_rds(
   list(
     samples = samples_burn,
@@ -444,7 +412,7 @@ write_rds(
     nodes1 = config$nodes1
     # nodes2 = nodes2
   ),
-  file.path(path, "samples.rds")
+  file.path(dest, "samples.rds")
 )
 
 
