@@ -9,7 +9,7 @@ modelCode <- nimbleCode({
 
   # estimate apparent survival
   logit_mean_phi ~ dnorm(phi_prior_mean, tau = phi_prior_tau)
-  sigma_phi ~ dinvgamma(1, 1)
+  sigma_phi ~ dunif(0, 100)
   # log(sigma_phi) <- log_sigma_phi
   tau_phi <- 1/sigma_phi^2
   for(i in 1:n_property){
@@ -19,7 +19,7 @@ modelCode <- nimbleCode({
     }
   }
 
-  mean_ls ~ dunif(1, 10)
+  mean_ls ~ dinvgamma(3, 20)
 
   for(i in 1:n_ls){
     J[i] ~ dpois(mean_ls)
@@ -42,7 +42,7 @@ modelCode <- nimbleCode({
   for(i in 1:n_survey){
 
     # probability of capture, given that an individual is in the surveyed area
-    log_theta[i] <- log(ilogit(inprod(X_p[i, 1:m_p], beta_p[1:m_p]))) +
+    log_theta[i] <- log(ilogit(inprod(X_p[county[i], 1:m_p], beta_p[1:m_p]))) +
       log_gamma[i]
 
     # data model
@@ -77,7 +77,7 @@ modelCode <- nimbleCode({
 
     # eps_property_pR[i] ~ dnorm(0, tau = 1) # property effect in observation model
 
-    n[i, 1] ~ dpois(z1[i])
+    N[i, PPNum[i, 1]] ~ dpois(z1[i])
     z1[i] ~ dinvgamma(1, 1)
 
     for(t in 2:n_timesteps[i]){ # loop through sampled PP only
