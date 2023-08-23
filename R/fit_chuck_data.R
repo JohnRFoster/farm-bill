@@ -56,11 +56,12 @@ source("R/functions_data_processing.R")
 
 passes <- take_df |>
   left_join(property_areas) |>
-  # select(property_idx, timestep, Take, Effort, method_idx, area_km2) |>
+  # select(property_idx, timestep) |>
   group_by(property_idx, timestep) |>
   mutate(pass = 1:n()) |>
   filter(max(pass) > 1) |>
   arrange(property_idx, timestep, pass) |>
+  ungroup() |>
   group_by(property_idx) |>
   mutate(timestep = timestep - min(timestep) + 1,
          Effort = if_else(is.na(Effort), 1, Effort)) |>
@@ -133,7 +134,7 @@ pp <- all_county_units |>
               values_from = timestep,
               id_cols = Property)
 
-data_ls <- suppressWarnings(get_site_data(passes))
+data_ls <- suppressWarnings(get_site_data(passes, 1))
 
 ymat <- data_ls$ymat         # take, each row is a spatio-temporal unit (property x primary period), passes in columns
 #ymat[is.na(ymat)] <- -1
@@ -282,7 +283,7 @@ inits <- function(){
   n_init <- round(y_removed / min(boot::inv.logit(logit_p)))
   list(
     n = n_init,
-    z1 = log(n_init[,1]),
+    z1 = n_init[,1],
     mu_p = mu_p,
     logit_p = logit_p,
     sigma_p = sigma_p,
@@ -347,7 +348,7 @@ j <- unlist(lapply(nodes_check, function(x) grep(x, all_nodes)))
 
 params <- samples[,j]
 
-dest <- file.path(dir_out, dir_model, if_else(config$nb_likelihood, "negbinom", "poisson"))
+dest <- file.path(dir_out, dir_model, if_else(config$nb_likelihood, "negbinom", "poissonGamma"))
 print(dest)
 if(!dir.exists(dest)) dir.create(dest, recursive = TRUE, showWarnings = FALSE)
 
