@@ -212,7 +212,7 @@ secondaryperiod<-function(SPdays=1,rdate, rdata){
 ###
 ###################
 
-get_site_data <- function(data){
+get_site_data <- function(data, SPdays){
   require(reshape2)
   require(splines)
 
@@ -237,11 +237,14 @@ get_site_data <- function(data){
     rdata=rdata[order(rdata$Site,rdata$Date,rdata$Methods),]
 
     ### Set the secondary period (SPdays = number of days for secondary period)
-    rdata$SPNum=secondaryperiod(SPdays = 1, rdate=rdata$Date, rdata = rdata)
-    # rdata <- rdata |>
-    #   group_by(PPNum) |>
-    #   mutate(SPNum = 1:n()) |>
-    #   ungroup()
+    if(SPdays == 0){
+      rdata <- rdata |>
+        group_by(PPNum) |>
+        mutate(SPNum = 1:n()) |>
+        ungroup()
+    } else {
+      rdata$SPNum=secondaryperiod(SPdays = SPdays, rdate=rdata$Date, rdata = rdata)
+    }
 
     ### Upload or create an area data frame giving the area for each site in km2, allow for a buffer if removal efforts on the edge of the study area
     property_area <- rdata$area_km2[1]
