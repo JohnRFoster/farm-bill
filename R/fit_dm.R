@@ -5,14 +5,14 @@ library(lubridate)
 library(targets)
 library(coda)
 
-config_name <- "dynamic_multi_method_poisson"
+config_name <- "mis_multi_method_poisson"
 
 Sys.setenv(R_CONFIG_ACTIVE = config_name)
 config <- config::get()
 dir_model <- config_name
-nb_likelihood <- if_else(config$nb_likelihood, TRUE, FALSE)
-pois_likelihood <- !nb_likelihood
+likelihood <- config$likelihood
 
+dir_out <- "out"
 dir_data <- "data"
 
 take_csv <- "all_chuck_data.csv"
@@ -48,7 +48,8 @@ passes <- take_df |>
   group_by(property_idx, PPNum) |>
   mutate(pass = 1:n()) |>
   filter(max(pass) > 1) |>
-  ungroup()
+  ungroup() |>
+  mutate(PPNum = PPNum - min(PPNum) + 1)
 
 good_properties <- passes |>
   select(Property, PPNum) |>
@@ -73,7 +74,7 @@ reps <- passes |>
   ungroup() |>
   left_join(good_properties)
 
-data_ls <- suppressWarnings(get_site_data(passes))
+data_ls <- suppressWarnings(get_site_data(passes, 0))
 Areaper <- data_ls$Areaper
 gamma <- Areaper |>
   pivot_longer(cols = -c(ts, Property),
@@ -148,6 +149,7 @@ c_survey_obs <- survey_obs |>
 X <- c_survey_obs |>
   select(starts_with("c_")) |>
   as.matrix()
+X <- cbind(1, X)
 
 pp <- all_county_units |>
   group_by(Property) |>
@@ -196,9 +198,7 @@ n_pp_include <- apply(all_pp_wide, 1, function(x) max(which(!is.na(x))))
 
 # Generate start and end indices for previous surveys ---------------------
 take <- passes |>
-  group_by(Property, PPNum) |>
-  mutate(order = 1:n()) |>
-  ungroup() |>
+  mutate(order = pass) |>
   mutate(method = as.numeric(as.factor(Methods)))
 
 take$start <- 0
@@ -269,7 +269,6 @@ constants <- list(
   n_property = n_property,
   n_county_units = nrow(county_sampled_units),
   n_prop = n_prop,
-  n_beta_p = 4,
   n_first_survey = length(which(take$order == 1)),
   n_not_first_survey = length(which(take$order != 1)),
   n_units = nrow(sampled_units),
@@ -280,7 +279,7 @@ constants <- list(
   m_p = ncol(X),
   first_survey = which(take$order == 1),
   not_first_survey = which(take$order != 1),
-  p_property_idx = take$Property,
+  p_property_idx = take$property_idx,
   p_pp_idx = take$PPNum,
   start = take$start,
   end = take$end,
@@ -292,7 +291,7 @@ constants <- list(
   phi_prior_mean = 3.3,
   phi_prior_tau = 1,
   M_lookup = n_prop_county1,
-  county = as.numeric(as.factor(county_sampled_units$County)),
+  county = as.numeric(as.factor(take$County)),
   pH = as.matrix(pop_growth_lookup)
 )
 
@@ -305,3 +304,129 @@ data <- list(
   X_p = X,
   log_gamma = log(gamma$value)
 )
+
+inits <- function(){
+  sigma_phi <- runif(1, 0.2, 0.5)
+  logit_mean_phi <- rnorm(1, 3, sigma_phi)
+  mean_lpy <- 1
+  mean_ls <- round(runif(1, 3.5, 6.4))
+  zeta <- rep(mean_lpy / 365 * constants$pp_len * mean_ls, constants$n_pp)
+  dm <- matrix(NA, n_property, max(constants$all_pp, na.rm = TRUE))
+  S <- R <- dm
+  for(i in 1:constants$n_property){
+    dm[i, constants$all_pp[i, 1]] <- round(runif(1, 100, 500))
+    for(t in 2:constants$n_pp_prop[i]){
+      phi <- nimble::ilogit(rnorm(1, logit_mean_phi, sigma_phi))
+      n_avail <- max(0, dm[i, constants$all_pp[i, t-1]] - data$rem[i, t-1])
+      if(is.na(n_avail)) print(t)
+      S[i, t-1] <- rbinom(1, n_avail, phi)
+      R[i, t-1] <- rpois(1, zeta[constants$all_pp[i, t-1]] * n_avail/2)
+      dm[i, constants$all_pp[i, t]] <- S[i, t-1] + R[i, t-1]
+    }
+  }
+
+  N <- matrix(NA, constants$n_property, max(take$PPNum))
+  for(i in 1:constants$n_property){
+    for(t in 1:constants$n_timesteps[i]){ # loop through sampled PP only
+      N[i, constants$PPNum[i, t]] <- dm[i, constants$PPNum[i, t]]
+    }
+  }
+  list(
+    z1 = apply(N, 1, function(x) x[min(which(!is.na(x)))]),
+    beta_p = rnorm(ncol(X)),
+    logit_mean_phi = logit_mean_phi,
+    sigma_phi = sigma_phi,
+    S = S,
+    R = R,
+    N = N,
+    mean_ls = mean_ls
+  )
+}
+
+likelihood_nb <- if_else(likelihood == "nb", TRUE, FALSE)
+likelihood_binom <- ifelse(likelihood == "binomial", TRUE, FALSE)
+likelihood_poisson <- ifelse(likelihood == "poisson", TRUE, FALSE)
+spatial <- FALSE
+
+source("R/nimble_DynamicMultiMethodDM.R")
+source("R/functions_nimble.R")
+Rmodel <- nimbleModel(
+  code = modelCode,
+  constants = constants,
+  inits = inits(),
+  data = data
+)
+
+# Rmodel$n
+# Rmodel$n - y_removed
+
+# warnings()
+# check initialization
+Rmodel$initializeInfo()
+
+Cmodel <- compileNimble(Rmodel)
+Cmodel$calculate()
+
+# default MCMC configuration
+mcmcConf <- configureMCMC(Cmodel, useConjugacy = TRUE)
+mcmcConf$removeSamplers("beta_p")
+mcmcConf$addSampler("beta_p", "AF_slice")
+
+mcmcConf$addMonitors(c("xn", "M", "lambda"))
+
+# mcmcConf$removeSampler("n")
+
+Rmcmc <- buildMCMC(mcmcConf)
+Cmcmc <- compileNimble(Rmcmc)
+
+n_iter <- 120000
+n_chains <- 3
+
+samples <- runMCMC(
+  Cmcmc,
+  nburnin = 0,
+  thin = 1,
+  niter = n_iter,
+  nchains = n_chains,
+  samplesAsCodaMCMC = TRUE
+)
+
+nodes_check <- config$nodes1
+all_nodes <- colnames(samples[[1]])
+j <- unlist(lapply(nodes_check, function(x) grep(x, all_nodes)))
+
+params <- samples[,j]
+
+dest <- file.path(dir_out, dir_model)
+print(dest)
+if(!dir.exists(dest)) dir.create(dest, recursive = TRUE, showWarnings = FALSE)
+
+message("Creating traceplots...")
+png(filename = file.path(dest, "mcmcTimeseries%03d.png"))
+plot(params)
+dev.off()
+message("  done")
+
+message("Calculating PSRF...")
+psrf <- gelman.diag(params, multivariate = FALSE)
+print(psrf)
+
+message("Calculating effective samples...")
+effective_samples <- effectiveSize(params)
+print(effective_samples)
+
+message("Calculating burnin...")
+ff <- tempfile()
+png(filename = ff)
+GBR <- gelman.plot(params)
+dev.off()
+unlink(ff)
+
+burnin <- GBR$last.iter[tail(which(apply(GBR$shrink[, , 2] > 1.1, 1, any)), 1) + 1]
+print(burnin)
+
+if(is.na(burnin)) burnin <- 85000
+
+
+
+
