@@ -81,3 +81,9 @@ dynamic_multi_method_poisson:
   inherits: dynamic_multi_method
   nb_likelihood: FALSE
 
+mis_multi_method_poisson:
+  likelihood: "poisson"
+  dir_out: "out/mis_multi_method"
+  model_file: "R/nimble_DynamicMultiMethodDM"
+  nodes1: !expr c("beta_p", "logit_mean_phi", "sigma_phi", "mean_ls")
+
