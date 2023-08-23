@@ -14,7 +14,6 @@ modelCode <- nimbleCode({
   tau_phi <- 1/sigma_phi^2
   for(i in 1:n_property){
     for(t in 1:(n_pp_prop[i]-1)){
-      # alpha_phi[pH[i, t]] ~ dnorm(0, tau = tau_phi)
       logit_phi[pH[i, t]] ~ dnorm(logit_mean_phi, tau = tau_phi)
       logit(phi[pH[i, t]]) <- logit_phi[pH[i, t]]
     }
@@ -41,8 +40,6 @@ modelCode <- nimbleCode({
 
 
   for(i in 1:n_survey){
-
-    # log_pr_area_sampled[i] <- min(0, log_potential_area[i] - log_survey_area_km2[i])
 
     # probability of capture, given that an individual is in the surveyed area
     log_theta[i] <- log(ilogit(inprod(X_p[i, 1:m_p], beta_p[1:m_p]))) +
@@ -80,9 +77,8 @@ modelCode <- nimbleCode({
 
     # eps_property_pR[i] ~ dnorm(0, tau = 1) # property effect in observation model
 
-    N[i, PPNum[i, 1]] ~ dpois(lambda_1[i])
-    log(lambda_1[i]) <- log_lambda_1[i]
-    log_lambda_1[i] ~ dnorm(5, tau = 1)
+    n[i, 1] ~ dpois(z1[i])
+    z1[i] ~ dinvgamma(1, 1)
 
     for(t in 2:n_timesteps[i]){ # loop through sampled PP only
       N[i, PPNum[i, t]] ~ dpois(dm[i, PPNum[i, t]])
@@ -93,14 +89,8 @@ modelCode <- nimbleCode({
     for(j in 2:n_pp_prop[i]){ # loop through every PP, including missing ones
 
       Z[i, j-1] <- dm[i, all_pp[i, j-1]] - rem[i, j-1]
-
-      if(demographic_stochasticity){
-        S[i, j-1] ~ dbinom(phi[pH[i, j-1]], Z[i, j-1])
-        R[i, j-1] ~ dpois(zeta[all_pp[i, j-1]] * Z[i, j-1] / 2)
-      } else {
-        S[i, j-1] <- phi[pH[i, j-1]] * Z[i, j-1]
-        R[i, j-1] <- zeta[all_pp[i, j-1]] * Z[i, j-1] / 2
-      }
+      S[i, j-1] ~ dbinom(phi[pH[i, j-1]], Z[i, j-1])
+      R[i, j-1] ~ dpois(zeta[all_pp[i, j-1]] * Z[i, j-1] / 2)
       dm[i, all_pp[i, j]] <- S[i, j-1] + R[i, j-1]
       lambda[pH[i, j-1]] <- dm[i, all_pp[i, j]] / dm[i, all_pp[i, j-1]]
     }
