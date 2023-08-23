@@ -32,9 +32,9 @@ modelCode <- nimbleCode({
   for(i in 1:n_property){
 
     # prior on first latent state
-    n[i, 1] ~ dpois(mu[i, 1])
-    log(mu[i, 1]) <- z1[i]
-    z1[i] ~ dunif(0, 10)
+    n[i, 1] ~ dpois(z1[i])
+    # log(mu[i, 1]) <- z1[i]
+    z1[i] ~ dinvgamma(1, 1)
 
     for(t in 2:n_timestep[i]){
 
