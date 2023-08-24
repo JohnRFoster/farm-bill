@@ -379,7 +379,7 @@ mcmcConf$addMonitors(c("xn", "M", "lambda"))
 Rmcmc <- buildMCMC(mcmcConf)
 Cmcmc <- compileNimble(Rmcmc)
 
-n_iter <- 120000
+n_iter <- 50000
 n_chains <- 3
 
 samples <- runMCMC(
@@ -425,7 +425,168 @@ unlink(ff)
 burnin <- GBR$last.iter[tail(which(apply(GBR$shrink[, , 2] > 1.1, 1, any)), 1) + 1]
 print(burnin)
 
-if(is.na(burnin)) burnin <- 85000
+if(is.na(burnin)) burnin <- 40000
+
+samps_burn <- window(samples, start = burnin)
+samps_mat <- as.matrix(samples)
+samps_quants <- apply(samps_mat, 2, quantile, c(0.025, 0.5, 0.975))
+
+subset_quants <- function(df, x){
+  df[,grep(x, colnames(df), fixed = TRUE)] |>
+    as_tibble() |>
+    mutate(quant = c("low", "median", "high")) |>
+    pivot_longer(cols = -quant,
+                 names_to = "node") |>
+    pivot_wider(names_from = quant,
+                values_from = value)
+}
+
+point_size <- 4
+line_width <- 2
+
+subset_quants(samps_quants, "beta_p") |>
+  mutate(Variable = factor(c("Intercept", "Road density", "Ruggedness", "Canopy density"),
+    levels = c("Intercept", "Road density", "Ruggedness", "Canopy density"))) |>
+  ggplot() +
+  aes(y = Variable, x = median, xmin = low, xmax = high) +
+  geom_point(size = point_size) +
+  geom_linerange(linewidth = line_width) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  labs(x = "Effect",
+       y = "Covariate") +
+  theme_bw()
+
+samps_mat[,grep("logit_mean_phi", colnames(samps_mat), fixed = TRUE)] |>
+  ilogit() |>
+  quantile(c(0.025, 0.5, 0.975)) |>
+  as_tibble() |>
+  mutate(quant = c("low", "median", "high")) |>
+  pivot_longer(cols = -quant,
+               names_to = "node") |>
+  pivot_wider(names_from = quant,
+              values_from = value) |>
+  mutate(node = "Mean survival") |>
+  ggplot() +
+  aes(y = node, x = median, xmin = low, xmax = high) +
+  geom_point(size = point_size) +
+  geom_linerange(linewidth = line_width) +
+  labs(x = "90 day survival rate",
+       y = "",
+       title = "Mean survival") +
+  coord_flip() +
+  theme_bw()
+
+samps_mat[,grep("sigma_phi", colnames(samps_mat), fixed = TRUE)] |>
+  quantile(c(0.025, 0.5, 0.975)) |>
+  as_tibble() |>
+  mutate(quant = c("low", "median", "high")) |>
+  pivot_longer(cols = -quant,
+               names_to = "node") |>
+  pivot_wider(names_from = quant,
+              values_from = value) |>
+  mutate(node = "Error in survival") |>
+  ggplot() +
+  aes(y = node, x = median, xmin = low, xmax = high) +
+  geom_point(size = point_size) +
+  geom_linerange(linewidth = line_width) +
+  labs(x = "Standard dev.",
+       y = "",
+       title = "SD survival") +
+  coord_flip() +
+  theme_bw()
+
+samps_mat[,grep("mean_ls", colnames(samps_mat), fixed = TRUE)] |>
+  quantile(c(0.025, 0.5, 0.975)) |>
+  as_tibble() |>
+  mutate(quant = c("low", "median", "high")) |>
+  pivot_longer(cols = -quant,
+               names_to = "node") |>
+  pivot_wider(names_from = quant,
+              values_from = value) |>
+  mutate(node = "Litter size") |>
+  ggplot() +
+  aes(y = node, x = median, xmin = low, xmax = high) +
+  geom_point(size = point_size) +
+  geom_linerange(linewidth = line_width) +
+  labs(x = "Piglets per litter",
+       y = "",
+       title = "litter size") +
+  coord_flip() +
+  theme_bw()
+
+
+property_idxs <- passes |>
+  select(Property, property_idx) |>
+  distinct() |>
+  mutate(property_idx = 1:n())
+
+property_lookup <- passes |>
+  select(Property, PPNum, pp_start_date, pp_end_date) |>
+  distinct() |>
+  group_by(Property) |>
+  arrange(Property, PPNum) |>
+  mutate(timestep = 1:n()) |>
+  ungroup() |>
+  left_join(property_idxs) |>
+  mutate(n_idx = 1:n())
+
+property_addition <- all_county_units |>
+  select(-timestep, -cnty_property)
+
+p_lookup <- left_join(property_lookup, property_addition)
+
+take_sums <- take |>
+  group_by(Property, PPNum) |>
+  summarise(Take = sum(Take)) |>
+  ungroup() |>
+  mutate(n_idx = 1:n())
+
+draws <- sample.int(nrow(samps_mat), 5000, replace = TRUE)
+N <- samps_mat[draws, grep("xn", colnames(samps_mat))]
+n_long <- N |>
+  as_tibble() |>
+  mutate(iter = 1:n()) |>
+  pivot_longer(cols = -iter,
+               names_to = "node",
+               values_to = "abundance") |>
+  mutate(n_idx = as.numeric(str_extract(node, "(?<=\\[)\\d*"))) |>
+  left_join(p_lookup) |>
+  left_join(take_sums) |>
+  mutate(density = abundance / area_km2,
+         take_density = Take / area_km2)
+
+N <- n_long |>
+  group_by(node, n_idx, Property, PPNum, pp_start_date, pp_end_date,
+           timestep, property_idx, County, county_idx, area_km2, Take, take_density) |>
+  summarise(low = as.numeric(quantile(density, 0.025)),
+            median = as.numeric(quantile(density, 0.5)),
+            high = as.numeric(quantile(density, 0.975)),
+            mean = mean(density),
+            sd = sd(density),
+            cv = sd / mean,
+            ci_range = high-low) |>
+  ungroup() |>
+  mutate(metric = "density")
+
+N |>
+  filter(Property == "Hayes") |>
+  mutate(time = mdy(pp_end_date)) |>
+  ggplot() +
+  aes(x = time, y = median, ymin = low, ymax = high, color = "Abundance") +
+  geom_point(size = point_size) +
+  geom_linerange(linewidth = line_width) +
+  geom_point(aes(y = take_density, color = "Take")) +
+  facet_wrap(~ Property) +
+  labs(x = "Date",
+       y = "Density") +
+  theme_bw()
+
+
+
+
+
+
+
 
 
 
